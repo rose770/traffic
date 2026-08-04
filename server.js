@@ -474,7 +474,11 @@ if (frontendDir) {
   console.log(`Serving frontend static files from: ${frontendDir}`);
   app.use(express.static(frontendDir));
 
-  app.get('*', (req, res) => {
+  // Express 5 changed how wildcard routes are parsed by path-to-regexp,
+  // so a bare app.get('*', ...) throws at startup. Using app.use() with no
+  // path here matches every remaining request without needing route-pattern
+  // parsing at all, so it works on both Express 4 and 5.
+  app.use((req, res) => {
     res.sendFile(path.join(frontendDir, 'index.html'));
   });
 } else {
