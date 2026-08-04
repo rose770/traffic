@@ -3,6 +3,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,10 +12,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Allow large JSON payloads for CAD/Maps
-
-// Serve the built frontend (from `npm run build` -> dist/) when present.
-// This lets one Render service host both the API and the app.
-app.use(express.static(path.join(__dirname, 'dist')));
 
 let db;
 
@@ -87,7 +84,25 @@ async function initializeDB() {
       // Ignore UNIQUE constraint errors if they already exist
     }
   }
-  
+
+  // Stage 3 (تنفيذ والتحقق من الجاهزية) gate: tracks whether the joint Field
+  // Inspection + Execution Sequencing readiness report has been signed.
+  // ALTER is wrapped in try/catch since SQLite errors on a duplicate column
+  // when this runs against a database that already has it.
+  try {
+    await db.exec(`ALTER TABLE permits ADD COLUMN readiness_status TEXT DEFAULT 'pending'`);
+  } catch (err) {
+    // Column already exists — safe to ignore
+  }
+
+  // Stage 4 gate: flips to 'started' once at least one TDP-FU periodic
+  // report has been filed, unlocking the Closure filter in Active Zones.
+  try {
+    await db.exec(`ALTER TABLE permits ADD COLUMN monitoring_status TEXT DEFAULT 'pending'`);
+  } catch (err) {
+    // Column already exists — safe to ignore
+  }
+
   console.log('Database initialized.');
 }
 
@@ -255,13 +270,34 @@ app.get('/api/reports', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-app.post('/api/permits/:id/periodic-inspections', async (req, res) => {
+// POST /api/permits/:id/field-readiness — Stage 3 (تنفيذ والتحقق من الجاهزية):
+// persists the joint Field Inspection (20 items) + Execution Sequencing (20 items)
+// results as the official "محضر جاهزية" and satisfies decision gate 3
+// ("محضر الجاهزية قبل التشغيل") from the official process document.
+app.post('/api/permits/:id/field-readiness', async (req, res) => {
   const { id } = req.params;
-  const { decision, score, notes, inspector_name, badge_id, domain_scores } = req.body;
+  const { fieldInspection, executionSequencing, completedAt } = req.body;
   try {
     const result = await db.run(
       'INSERT INTO official_documents (permit_id, doc_type, data) VALUES (?, ?, ?)',
-      [id, 'periodic_inspection_tdp_fu', JSON.stringify({ decision, score, notes, inspector_name, badge_id, domain_scores, date: new Date().toISOString() })]
+      [id, 'field_readiness_verification', JSON.stringify({ fieldInspection, executionSequencing, completedAt })]
+    );
+    await db.run('UPDATE permits SET readiness_status = ? WHERE id = ?', ['verified', id]);
+    res.json({ success: true, id: result.lastID });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/permits/:id/opening-minutes — Step 2 (مراجعة واعتماد التحويلة
+// وإصدار التصاريح): stores the signed محضر فتح تحويلة (opening minutes).
+app.post('/api/permits/:id/opening-minutes', async (req, res) => {
+  const { id } = req.params;
+  const { dayName, hijriDate, gregorianDate, roadName, signatures } = req.body;
+  try {
+    const result = await db.run(
+      'INSERT INTO official_documents (permit_id, doc_type, data) VALUES (?, ?, ?)',
+      [id, 'opening_minutes', JSON.stringify({ dayName, hijriDate, gregorianDate, roadName, signatures })]
     );
     res.json({ success: true, id: result.lastID });
   } catch (err) {
@@ -269,8 +305,22 @@ app.post('/api/permits/:id/periodic-inspections', async (req, res) => {
   }
 });
 
+app.post('/api/permits/:id/periodic-inspections', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.run(
+      'INSERT INTO official_documents (permit_id, doc_type, data) VALUES (?, ?, ?)',
+      [id, 'periodic_inspection_tdp_fu', JSON.stringify({ ...req.body, date: new Date().toISOString() })]
+    );
+    await db.run(`UPDATE permits SET monitoring_status = 'started' WHERE id = ?`, [id]);
+    res.json({ success: true, id: result.lastID });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // --- AUTOMATED GIS LOCATION-TO-DXF/CAD GENERATOR ---
-function buildDXFContent({ lat = 24.4686, lng = 39.6120, radius_meters = 200, detourNodes = [], boundaryPoints = [], projectName = 'Madinah Detour Work Site' }) {
+function buildDXFContent({ lat = 24.4686, lng = 39.6120, radius_meters = 200, detourNodes = [], boundaryPoints = [], projectName = 'Detour Work Site' }) {
   const centerLat = parseFloat(lat) || 24.4686;
   const centerLng = parseFloat(lng) || 39.6120;
   const r = parseInt(radius_meters) || 200;
@@ -387,7 +437,7 @@ function buildDXFContent({ lat = 24.4686, lng = 39.6120, radius_meters = 200, de
   // 5. Annotations & Title Block Text
   dxf.push('0', 'TEXT', '8', 'SAFETY_SIGNS_TEXT', '10', (x - 20).toFixed(3), '20', (y + 12).toFixed(3), '30', '0.0', '40', '2.5', '1', projectName);
   dxf.push('0', 'TEXT', '8', 'SAFETY_SIGNS_TEXT', '10', (x - 20).toFixed(3), '20', (y - 15).toFixed(3), '30', '0.0', '40', '2.0', '1', `UTM Zone 37N Ref: E ${x.toFixed(1)}m, N ${y.toFixed(1)}m`);
-  dxf.push('0', 'TEXT', '8', 'SAFETY_SIGNS_TEXT', '10', (x - 20).toFixed(3), '20', (y - 20).toFixed(3), '30', '0.0', '40', '1.8', '1', 'Generated by Madinah Regional Municipality GIS Engine (Scale 1:1000)');
+  dxf.push('0', 'TEXT', '8', 'SAFETY_SIGNS_TEXT', '10', (x - 20).toFixed(3), '20', (y - 20).toFixed(3), '30', '0.0', '40', '1.8', '1', 'Generated by Tahcom GIS Engine (Scale 1:1000)');
 
   dxf.push('0', 'ENDSEC', '0', 'EOF');
 
@@ -401,24 +451,45 @@ app.post('/api/generate-cad', (req, res) => {
     const dxfContent = buildDXFContent({ lat, lng, radius_meters, detourNodes, boundaryPoints, projectName });
 
     res.setHeader('Content-Type', 'application/dxf');
-    res.setHeader('Content-Disposition', `attachment; filename="madinah_detour_site_${Date.now()}.dxf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="detour_site_${Date.now()}.dxf"`);
     res.send(dxfContent);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// SPA catch-all: any non-API GET request falls through to the built frontend's
-// index.html so client-side routing works. Must be registered after all
-// /api/* routes above.
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+// --- SERVE THE BUILT FRONTEND ---
+// Everything below this line must come AFTER all /api routes above,
+// so API calls are handled by their own routes and never accidentally
+// swallowed by the catch-all route that serves the React app.
+//
+// NOTE: adjust FRONTEND_DIR_NAME below if your frontend build lives in a
+// different location relative to this server file (e.g. '../client/dist').
+const candidateDirs = ['dist', 'build', path.join('client', 'dist'), path.join('client', 'build')];
+const frontendDir = candidateDirs
+  .map(dir => path.join(__dirname, dir))
+  .find(fullPath => fs.existsSync(fullPath));
 
+if (frontendDir) {
+  console.log(`Serving frontend static files from: ${frontendDir}`);
+  app.use(express.static(frontendDir));
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDir, 'index.html'));
+  });
+} else {
+  console.warn(
+    'WARNING: No frontend build folder found (looked for dist/build). ' +
+    'The API will work, but no frontend will be served. ' +
+    'Make sure your build command actually builds the frontend before this server starts.'
+  );
+}
+
+// Render assigns the port dynamically via process.env.PORT — hardcoding 5000
+// causes Render's health check to fail and the whole service to appear down.
 const PORT = process.env.PORT || 5000;
 initializeDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
 });
-
