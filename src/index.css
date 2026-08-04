@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #016b68;
+  --color-brand-primary-hover: #025350;
+  --color-brand-primary-dark: #014d4a;
+  --color-brand-dark: #043531;
+  --color-brand-dark-hover: #032724;
+  --color-brand-teal: #00958A;
+  --color-brand-gold: #bfa260;
+  --color-brand-gold-hover: #a38446;
+  --color-brand-light: #f5faf8;
+  --color-brand-light-card: #ffffff;
+  --color-brand-text-dark: #101828;
+  --color-brand-text-gray: #4b5563;
+  --color-brand-green: #016b68;
+  --color-brand-green-light: #a8d8d4;
+  --color-red-150: #fecaca;
+  --color-red-650: #c0392b;
+  --color-red-750: #a93226;
+  --font-sans: 'Inter', 'Noto Sans Arabic', sans-serif;
+}
+
+body {
+  font-family: 'Inter', 'Noto Sans Arabic', sans-serif;
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+[dir="rtl"], [dir="rtl"] * {
+  font-family: 'Noto Sans Arabic', sans-serif !important;
+}
+
+/* Elevate general text readability */
+input, select, textarea, button {
+  font-size: 13.5px !important;
+}
+
+/* Boost Tailwind utilities slightly for clear readability */
+.text-xs {
+  font-size: 0.825rem !important; /* ~13.2px */
+}
+
+.text-\[10px\] {
+  font-size: 0.75rem !important; /* ~12px */
+}
+
+.text-\[9px\] {
+  font-size: 0.7rem !important; /* ~11.2px */
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* Custom Leaflet GIS Map Styling overrides */
+.leaflet-container {
+  font-family: inherit;
+}
+.custom-leaflet-marker {
+  background: transparent;
+  border: none;
+}
+.leaflet-popup-content-wrapper {
+  background: #043531 !important;
+  color: #f5faf8 !important;
+  border: 1px solid #bfa260 !important;
+  border-radius: 8px !important;
+}
+.leaflet-popup-tip {
+  background: #bfa260 !important;
+}
