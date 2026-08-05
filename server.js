@@ -2,6 +2,11 @@ import express from 'express';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -453,7 +458,22 @@ app.post('/api/generate-cad', (req, res) => {
   }
 });
 
-const PORT = 5000;
+// --- SERVE THE BUILT FRONTEND (production) ---
+// In local dev, Vite's own dev server handles the frontend on a separate
+// port \u2014 this block only matters in production (e.g. on Render), where
+// this server is the ONLY thing running and needs to serve both the API
+// and the built static files from `vite build`'s output (`dist/`).
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
+
+// Catch-all: any GET request that isn't an API route falls through to the
+// built index.html. Must be registered AFTER all the /api routes above,
+// so it doesn't swallow real API requests.
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+const PORT = process.env.PORT || 5000;
 initializeDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
