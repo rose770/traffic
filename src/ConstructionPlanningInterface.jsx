@@ -69,6 +69,8 @@ import MandatoryImplementationChecklist from './MandatoryImplementationChecklist
 import TrafficReferenceGuide from './TrafficReferenceGuide';
 import FieldReadinessModal from './FieldReadinessModal';
 import ProcessHomeScreen from './ProcessHomeScreen';
+import DwgMapOverlay from './DwgMapOverlay';
+import { RoadAutocomplete } from './components/RoadAutocomplete';
 import {
   DURATION_CATEGORIES,
   ROAD_CLASSIFICATIONS,
@@ -934,11 +936,13 @@ const ConstructionPlanningInterface = () => {
     }
   };
 
-  // State for CAD file analysis simulation
+  // State for CAD file analysis (real DWG parsing via DwgMapOverlay)
   const [cadFile, setCadFile] = useState(null);
   const [cadStatus, setCadStatus] = useState('idle'); // idle, parsing, parsed, error
   const [cadMetadata, setCadMetadata] = useState(null);
   const [cadAcknowledged, setCadAcknowledged] = useState(false);
+  // State for traffic element placements from DWG Map Overlay
+  const [dwgPlacements, setDwgPlacements] = useState([]);
 
   // State for active Traffic redirection zone preview
   const [activeTrafficZone, setActiveTrafficZone] = useState('warning'); // warning, transition, buffer, work, termination
@@ -2256,22 +2260,26 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     const file = e.target.files[0];
     if (file) {
       setCadFile(file);
-      setCadStatus('parsing');
-      
-      setTimeout(() => {
-        setCadStatus('parsed');
-        setCadMetadata({
-          filename: file.name,
-          fileSize: (file.size / 1024 / 1024).toFixed(2) + ' MB',
-          crs: 'WGS 84 / UTM Zone 37N (EPSG:32637)',
-          extents: 'Min: (582450E, 2703620N) - Max: (582980E, 2704100N)',
-          layers: 18,
-          geometryCount: 4218,
-          integrityCheck: 'PASSED (0 errors, 4 warnings)',
-          alignmentStatus: 'ALIGNED (Perfect match with local GIS)'
-        });
-      }, 2000);
+      setCadStatus('parsed');
+      setCadMetadata({
+        filename: file.name,
+        fileSize: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+        crs: 'Auto-detected',
+        extents: 'See map overlay',
+        layers: '-',
+        geometryCount: '-',
+        integrityCheck: 'Parsed via DWG Engine',
+        alignmentStatus: 'See DWG Map Overlay below'
+      });
+      // Mark cadFile in formData for validation
+      setFormData(f => ({ ...f, cadFile: file }));
     }
+  };
+
+  // Handler for DWG Map Overlay traffic element placements
+  const handleDwgPlacementsChange = (placements) => {
+    setDwgPlacements(placements);
+    setFormData(f => ({ ...f, trafficPlacements: placements }));
   };
 
   const addMilestone = () => {
@@ -3776,13 +3784,24 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         <label className="block text-xs font-bold text-brand-text-gray uppercase">
                           {language === 'ar' ? 'اسم الطريق' : 'Road Name'}
                         </label>
-                        <input
-                          type="text"
-                          name={language === 'ar' ? 'roadNameAr' : 'roadNameEn'}
+                        <RoadAutocomplete 
+                          language={language}
                           value={language === 'ar' ? formData.roadNameAr : formData.roadNameEn}
                           onChange={handleInputChange}
-                          placeholder={language === 'ar' ? 'مثال: طريق الملك عبدالعزيز' : 'e.g. King Abdulaziz Road'}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          onSelect={(result) => {
+                            // Automatically center map and add a boundary point
+                            if (result && result.lat && result.lng) {
+                              setBoundaryPoints([{ 
+                                lat: result.lat, 
+                                lng: result.lng, 
+                                id: Date.now() 
+                              }]);
+                              // Pan map if instance exists
+                              if (window.L && document.getElementById('map-container')) {
+                                // Map re-centering is handled by map bounds effect, but we can't easily reach map instance from here without ref
+                              }
+                            }
+                          }}
                         />
                       </div>
                       <div>
@@ -3897,68 +3916,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         }
                         return null;
                       })()}
-
-                      {/* External Provider Official Permit File Attachment */}
-                      <div className="col-span-1 md:col-span-2 border-t border-slate-100 pt-4 mt-2">
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase mb-1.5 flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <FileText className="w-4 h-4 text-brand-primary" />
-                            {language === 'ar' 
-                              ? 'مستند/شهادة تصريح الحفر الصادر من الجهة الخارجية (مطلوب رفع النسخة الرسمية)' 
-                              : 'Official Permit Document (Issued by External Provider)'}
-                          </span>
-                          <span className="text-[10px] text-brand-primary font-mono font-bold bg-brand-primary/10 px-2 py-0.5 rounded">
-                            PDF, PNG, JPG, DOC
-                          </span>
-                        </label>
-                        <p className="text-[11px] text-slate-500 mb-2">
-                          {language === 'ar' 
-                            ? 'نظراً لأن تصريح الحفر صادر من جهة خارجية مستقلة، يرجى رفع نسخة المستند الرسمي الصادر لتتم مراجعته والتحقق من التواريخ المعتمدة بواسطة المفتش.' 
-                            : 'Because the permit is issued by an external provider, please upload the official permit file for inspector verification.'}
-                        </p>
-
-                        <div className="relative border-2 border-dashed border-slate-300 hover:border-brand-primary rounded-xl p-4 text-center bg-slate-50 hover:bg-white transition cursor-pointer group">
-                          <input 
-                            type="file" 
-                            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                            onChange={handleExternalPermitFileUpload}
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                          />
-                          {formData.externalPermitDocName ? (
-                            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-emerald-800 font-bold text-xs">
-                              <div className="flex items-center gap-2">
-                                <FileCheck className="w-5 h-5 text-emerald-600" />
-                                <div className="text-left">
-                                  <span className="block font-mono text-emerald-900">{formData.externalPermitDocName}</span>
-                                  <span className="text-[10px] text-emerald-700 font-normal">
-                                    {language === 'ar' ? 'تم رفع المستند الرسمي بنجاح - جاهز للمراجعة' : 'External permit file uploaded successfully'}
-                                  </span>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setFormData(prev => ({ ...prev, externalPermitDocument: null, externalPermitDocName: '' }));
-                                }}
-                                className="text-red-500 hover:text-red-700 text-xs px-2 py-1 bg-white border border-red-200 rounded font-semibold"
-                              >
-                                {language === 'ar' ? 'إزالة' : 'Remove'}
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <Upload className="w-7 h-7 text-brand-primary mx-auto group-hover:scale-110 transition-transform" />
-                              <span className="text-xs font-bold text-slate-700 block">
-                                {language === 'ar' ? 'اضغط هنا لرفع تصريح الحفر الصادر من الجهة الخارجية' : 'Click or Drag to Upload Official External Permit File'}
-                              </span>
-                              <span className="text-[10px] text-slate-400 block">
-                                {language === 'ar' ? 'يدعم ملفات PDF والصور والمستندات الرسمية' : 'Supports PDF, Images and Office documents'}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -4605,7 +4562,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             {currentPhase === 2 && (
               <div className="space-y-6 animate-fade-in">
                 
-                {/* 1. CAD File upload */}
+                {/* 1. CAD File upload + DWG Map Overlay */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -4614,83 +4571,20 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   >
                     <span className="flex items-center gap-2">
                       <FileCode className="h-4.5 w-4.5 text-brand-primary" />
-                      {language === 'ar' ? '٢.١ رفع مخطط الأوتوكاد (CAD Blueprint)' : '2.1 CAD Blueprint Upload'}
+                      {language === 'ar' ? '٢.١ مخطط الأوتوكاد وعناصر التحكم المروري (CAD Blueprint & Traffic Elements)' : '2.1 CAD Blueprint & Traffic Element Placement'}
                     </span>
                     {expandedPanels.p2_blueprint ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
 
                   {expandedPanels.p2_blueprint && (
                     <div className="p-5 animate-fade-in space-y-4">
-                      {cadStatus === 'parsing' && (
-                        <div className="py-6 text-center text-xs text-brand-primary animate-pulse font-semibold">
-                          {language === 'ar' ? 'جاري معالجة ومطابقة المخطط الهندسي CAD...' : 'Parsing and aligning CAD blueprint file...'}
-                        </div>
-                      )}
-                      
-                      {cadStatus === 'parsed' && cadMetadata && (
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs space-y-2">
-                          <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                            <span className="font-bold text-slate-700">{language === 'ar' ? 'ملف المخطط المربوط:' : 'Aligned CAD Blueprint:'}</span>
-                            <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[10px] uppercase">ALIGNED & VERIFIED / تم التحقق</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div><span className="font-semibold text-slate-500">{language === 'ar' ? 'اسم الملف:' : 'Filename:'}</span> {cadMetadata.filename}</div>
-                            <div><span className="font-semibold text-slate-500">{language === 'ar' ? 'حجم الملف:' : 'Size:'}</span> {cadMetadata.fileSize}</div>
-                            <div><span className="font-semibold text-slate-500">{t.targetCrs}:</span> {cadMetadata.crs}</div>
-                            <div><span className="font-semibold text-slate-500">{t.entitiesCount}:</span> {cadMetadata.geometryCount}</div>
-                            <div className="col-span-2"><span className="font-semibold text-slate-500">{language === 'ar' ? 'المدى الهندسي (Extents):' : 'Drawing Extents:'}</span> <code className="bg-slate-200 px-1 rounded">{cadMetadata.extents}</code></div>
-                          </div>
-                          
-                          <div className="pt-3.5 border-t border-slate-200 flex flex-wrap gap-2 items-center justify-between">
-                            <div className="flex gap-2 items-center">
-                              <button
-                                type="button"
-                                onClick={() => { setCadFile(null); setCadStatus('idle'); setCadMetadata(null); }}
-                                className="text-red-650 hover:text-red-750 font-bold text-xs"
-                              >
-                                {language === 'ar' ? 'إزالة واستبدال الملف' : 'Remove & Replace File'}
-                              </button>
-                              
-                              <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded">
-                                {language === 'ar' ? '✓ تم رفع وتوثيق المخطط الهندسي' : '✓ CAD Blueprint Uploaded'}
-                              </span>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => downloadUploadedCadFile()}
-                              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-1.5 rounded transition shadow-sm"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                              <span>{language === 'ar' ? 'تحميل الملف المرفوع' : 'Download Uploaded CAD File'}</span>
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {cadStatus === 'idle' && (
-                        <div className="space-y-3">
-                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs font-semibold flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                            <span>
-                              {language === 'ar' 
-                                ? '⚠️ متطلب إجباري: يجب رفع ملف مخطط أوتوكاد المعتمد (DWG / DXF) للانتقال إلى الخطوات التالية.' 
-                                : '⚠️ Mandatory Requirement: You must upload an official CAD Blueprint file (DWG / DXF) to proceed.'}
-                            </span>
-                          </div>
-
-                          <div className="border-2 border-dashed border-slate-300 hover:border-brand-primary/60 rounded-xl p-8 bg-slate-50 text-center relative cursor-pointer hover:bg-slate-100/50 transition">
-                            <input type="file" accept=".dwg,.dxf" onChange={handleCadUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                            <Upload className="h-10 w-10 text-brand-primary mx-auto mb-2" />
-                            <span className="text-xs font-bold text-slate-800 block">
-                              {language === 'ar' ? 'اضغط هنا لرفع ملف المخطط الهندسي للتحويلة (DWG / DXF)' : 'Click to Upload CAD Blueprint File (DWG / DXF)'}
-                            </span>
-                            <span className="text-[10px] text-slate-500 block mt-1">
-                              {language === 'ar' ? 'الصيغ المقبولة: DWG, DXF (الحد الأقصى 50 ميجابايت)' : 'Supported Formats: DWG, DXF (Max 50MB)'}
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                      <DwgMapOverlay
+                        language={language}
+                        onPlacementsChange={handleDwgPlacementsChange}
+                        anchorLat={boundaryPoints[0]?.lat || 24.4686}
+                        anchorLng={boundaryPoints[0]?.lng || 39.6120}
+                        roadName={formData.roadNameAr || formData.roadNameEn}
+                      />
                     </div>
                   )}
                 </div>

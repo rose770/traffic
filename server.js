@@ -4,6 +4,12 @@ import { open } from 'sqlite';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
+import proj4 from 'proj4';
+import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +17,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Allow large JSON payloads for CAD/Maps
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 let db;
 
@@ -455,6 +462,703 @@ app.post('/api/generate-cad', (req, res) => {
     res.send(dxfContent);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- GEOTIFF FILE PARSER: Upload .tif / .tiff → returns metadata, WGS84 bounds ---
+app.post('/api/parse-geotiff', upload.single('tiffFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No GeoTIFF file uploaded' });
+    }
+
+    const { fromArrayBuffer } = await import('geotiff');
+    const fileName = req.file.originalname;
+    const fileSize = req.file.size;
+    console.log(`[GeoTIFF Parser] Processing: ${fileName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+
+    const arrayBuffer = req.file.buffer.buffer.slice(
+      req.file.buffer.byteOffset,
+      req.file.buffer.byteOffset + req.file.buffer.byteLength
+    );
+    const tiff = await fromArrayBuffer(arrayBuffer);
+    const image = await tiff.getImage();
+    const width = image.getWidth();
+    const height = image.getHeight();
+    const samplesPerPixel = image.getSamplesPerPixel();
+    const geoKeys = image.getGeoKeys?.() || {};
+    const origin = image.getOrigin?.() || [0, 0];
+    const resolution = image.getResolution?.() || [1, 1];
+    const rawBbox = image.getBoundingBox?.() || [
+      origin[0],
+      origin[1] - height * Math.abs(resolution[1]),
+      origin[0] + width * Math.abs(resolution[0]),
+      origin[1]
+    ];
+
+    const crsMap = {
+      'EPSG:32637': '+proj=utm +zone=37 +datum=WGS84 +units=m +no_defs',
+      'EPSG:32638': '+proj=utm +zone=38 +datum=WGS84 +units=m +no_defs',
+      'EPSG:20499': '+proj=utm +zone=37 +ellps=intl +towgs84=-143,-236,7,0,0,0,0 +units=m +no_defs',
+      'EPSG:3857': '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs',
+      'EPSG:4326': '+proj=longlat +datum=WGS84 +no_defs'
+    };
+
+    let detectedCRS = 'EPSG:32637';
+    if (geoKeys) {
+      const projCode = geoKeys.ProjectedCSTypeGeoKey || geoKeys.ProjectionGeoKey;
+      if (projCode && crsMap[`EPSG:${projCode}`]) {
+        detectedCRS = `EPSG:${projCode}`;
+      } else if (geoKeys.GeographicTypeGeoKey === 4326) {
+        detectedCRS = 'EPSG:4326';
+      }
+    } else if (rawBbox) {
+      const [minX, minY, maxX, maxY] = rawBbox;
+      if (minX >= -180 && maxX <= 180 && minY >= -90 && maxY <= 90) {
+        detectedCRS = 'EPSG:4326';
+      }
+    }
+
+    const fromProjStr = crsMap[detectedCRS] || crsMap['EPSG:32637'];
+    const wgs84 = crsMap['EPSG:4326'];
+
+    const [minX, minY, maxX, maxY] = rawBbox;
+    let swLat, swLng, neLat, neLng;
+    if (detectedCRS === 'EPSG:4326') {
+      swLng = minX; swLat = minY;
+      neLng = maxX; neLat = maxY;
+    } else {
+      const sw = proj4(fromProjStr, wgs84, [minX, minY]);
+      const ne = proj4(fromProjStr, wgs84, [maxX, maxY]);
+      swLng = sw[0]; swLat = sw[1];
+      neLng = ne[0]; neLat = ne[1];
+    }
+
+    const bounds = [
+      [Math.min(swLat, neLat), Math.min(swLng, neLng)],
+      [Math.max(swLat, neLat), Math.max(swLng, neLng)]
+    ];
+
+    res.json({
+      success: true,
+      fileName,
+      fileSize,
+      width,
+      height,
+      samplesPerPixel,
+      crs: detectedCRS,
+      rawBbox,
+      bounds,
+      center: [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2],
+      resolution: [Math.abs(resolution[0]), Math.abs(resolution[1])],
+      geoKeys
+    });
+  } catch (err) {
+    console.error('[GeoTIFF Parser] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to parse GeoTIFF file' });
+  }
+});
+
+// --- DWG FILE PARSER: Upload .dwg → returns GeoJSON with layer metadata ---
+let dwgdxfModule = null;
+async function getDwgDxf() {
+  if (!dwgdxfModule) {
+    dwgdxfModule = await import('dwgdxf');
+    await dwgdxfModule.init();
+  }
+  return dwgdxfModule;
+}
+
+app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const fileName = req.file.originalname;
+    const fileSize = req.file.size;
+    console.log(`[DWG Parser] Processing: ${fileName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
+
+    // Step 1: Convert DWG → DXF using dwgdxf (WASM)
+    const { convertDwgToDxf } = await getDwgDxf();
+    const dwgBytes = new Uint8Array(req.file.buffer);
+    const dxfBytes = await convertDwgToDxf(dwgBytes);
+    const dxfString = new TextDecoder().decode(dxfBytes);
+    console.log(`[DWG Parser] DXF generated: ${(dxfBytes.length / 1024).toFixed(1)} KB`);
+
+    // Step 2: Parse DXF entities
+    const DxfParser = (await import('dxf-parser')).default;
+    const parser = new DxfParser();
+    const dxf = parser.parseSync(dxfString);
+
+    // Step 3: Extract layers metadata
+    const layersRaw = dxf.tables?.layer?.layers || {};
+    const layers = Object.entries(layersRaw).map(([name, info]) => ({
+      name,
+      color: info.color || 7,
+      visible: !info.frozen && !info.off
+    }));
+
+    // Step 4: Compute coordinate bounding box with robust spatial median outlier rejection
+    const allX = [];
+    const allY = [];
+    const checkPt = (p) => {
+      if (p && typeof p.x === 'number' && isFinite(p.x) && typeof p.y === 'number' && isFinite(p.y)) {
+        allX.push(p.x);
+        allY.push(p.y);
+      }
+    };
+
+    (dxf.entities || []).forEach(e => {
+      if (e.vertices) e.vertices.forEach(checkPt);
+      if (e.center) checkPt(e.center);
+      if (e.startPoint) checkPt(e.startPoint);
+      if (e.endPoint) checkPt(e.endPoint);
+      if (e.position) checkPt(e.position);
+    });
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let medianX = 0, medianY = 0;
+    
+    if (allX.length > 0 && allY.length > 0) {
+      allX.sort((a, b) => a - b);
+      allY.sort((a, b) => a - b);
+      medianX = allX[Math.floor(allX.length / 2)];
+      medianY = allY[Math.floor(allY.length / 2)];
+      
+      // Radius threshold: 5,000 meters from cluster center to eliminate rogue paper-space coordinates
+      const MAX_CLUSTER_RADIUS = 5000;
+      for (let i = 0; i < allX.length; i++) {
+        if (Math.abs(allX[i] - medianX) <= MAX_CLUSTER_RADIUS) {
+          minX = Math.min(minX, allX[i]);
+          maxX = Math.max(maxX, allX[i]);
+        }
+      }
+      for (let i = 0; i < allY.length; i++) {
+        if (Math.abs(allY[i] - medianY) <= MAX_CLUSTER_RADIUS) {
+          minY = Math.min(minY, allY[i]);
+          maxY = Math.max(maxY, allY[i]);
+        }
+      }
+    }
+
+    const isPtValid = (p) => {
+      if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return false;
+      const dist = Math.hypot(p.x - medianX, p.y - medianY);
+      return dist < 5000;
+    };
+
+    // Step 5: Auto-detect or user-selected coordinate system and convert to WGS84
+    // Standard Projections for Saudi Arabia:
+    // EPSG:32637 (UTM Zone 37N - Madinah / Western Saudi)
+    // EPSG:32638 (UTM Zone 38N - Riyadh / Central Saudi)
+    // EPSG:20499 (Ain el Abd 1970 - Saudi National Grid)
+    const utmZone37N = '+proj=utm +zone=37 +datum=WGS84 +units=m +no_defs';
+    const utmZone38N = '+proj=utm +zone=38 +datum=WGS84 +units=m +no_defs';
+    const ainElAbd = '+proj=utm +zone=37 +ellps=intl +towgs84=-143,-236,7,0,0,0,0 +units=m +no_defs';
+    const wgs84 = '+proj=longlat +datum=WGS84 +no_defs';
+
+    let coordSystem = req.body?.crs || 'unknown';
+    let fromProj = null;
+
+    if (coordSystem === 'utm37n' || coordSystem === 'EPSG:32637') {
+      coordSystem = 'utm37n';
+      fromProj = utmZone37N;
+    } else if (coordSystem === 'utm38n' || coordSystem === 'EPSG:32638') {
+      coordSystem = 'utm38n';
+      fromProj = utmZone38N;
+    } else if (coordSystem === 'ain_el_abd' || coordSystem === 'EPSG:20499') {
+      coordSystem = 'ain_el_abd';
+      fromProj = ainElAbd;
+    } else {
+      // Auto-detection using filtered median / bounds
+      if (medianX > 100000 && medianX < 900000 && medianY > 2500000 && medianY < 3000000) {
+        coordSystem = 'utm37n';
+        fromProj = utmZone37N;
+        console.log('[DWG Parser] Auto-detected: UTM Zone 37N (EPSG:32637) in Madinah');
+      } else {
+        coordSystem = 'local';
+        console.log(`[DWG Parser] Coordinates appear to be local/arbitrary. Range: X=[${minX.toFixed(0)}, ${maxX.toFixed(0)}], Y=[${minY.toFixed(0)}, ${maxY.toFixed(0)}]`);
+      }
+    }
+
+    // Step 6: Convert entities to GeoJSON features
+    const features = [];
+    const anchorLat = parseFloat(req.body?.anchorLat) || 24.4686;
+    const anchorLng = parseFloat(req.body?.anchorLng) || 39.6120;
+
+    // For local coordinates: compute center of geometry and map to anchor point
+    const geomCenterX = (minX + maxX) / 2;
+    const geomCenterY = (minY + maxY) / 2;
+
+    const toLatLng = (x, y) => {
+      if (fromProj) {
+        const [lng, lat] = proj4(fromProj, wgs84, [x, y]);
+        return [lat, lng]; // [lat, lng] for Leaflet
+      } else {
+        // Local coordinates: offset from anchor in meters
+        const dx = x - geomCenterX;
+        const dy = y - geomCenterY;
+        const lat = anchorLat + (dy / 110574.61);
+        const lng = anchorLng + (dx / (111320 * Math.cos(anchorLat * Math.PI / 180)));
+        return [lat, lng];
+      }
+    };
+
+    // AutoCAD DXF color index to hex color
+    const aciToHex = (colorIndex) => {
+      const colors = {
+        1: '#FF0000', 2: '#FFFF00', 3: '#00FF00', 4: '#00FFFF', 5: '#0000FF',
+        6: '#FF00FF', 7: '#FFFFFF', 8: '#808080', 9: '#C0C0C0',
+        10: '#FF0000', 20: '#FF6600', 30: '#FF9900', 40: '#FFCC00',
+        50: '#FFFF00', 60: '#CCFF00', 70: '#66FF00', 80: '#00FF00',
+        90: '#00FF66', 100: '#00FFCC', 110: '#00FFFF', 120: '#00CCFF',
+        130: '#0066FF', 140: '#0000FF', 150: '#6600FF', 160: '#CC00FF',
+        170: '#FF00FF', 180: '#FF00CC', 190: '#FF0066', 200: '#FF3333',
+        210: '#FF6666', 220: '#FF9999', 230: '#FFCCCC', 240: '#990000',
+        250: '#333333', 251: '#555555', 252: '#777777', 253: '#999999',
+        254: '#BBBBBB', 255: '#DDDDDD'
+      };
+      return colors[colorIndex] || '#AAAAAA';
+    };
+
+    const entityColor = (entity) => {
+      if (entity.color !== undefined && entity.color !== 256) return aciToHex(entity.color);
+      const layerInfo = layersRaw[entity.layer];
+      if (layerInfo && layerInfo.color) return aciToHex(layerInfo.color);
+      return '#AAAAAA';
+    };
+
+    // Text cleaner for AutoCAD formatting codes
+    const cleanDxfText = (raw) => {
+      if (!raw) return '';
+      let text = String(raw);
+      text = text.replace(/\\[PpXx]/g, ' ');
+      text = text.replace(/\\f[^;]+;/gi, '');
+      text = text.replace(/\\[A-Za-z0-9_]+;/gi, '');
+      text = text.replace(/\\S[^;]*;/gi, '');
+      text = text.replace(/\\[A-Za-z]/g, '');
+      text = text.replace(/[{}]/g, '');
+      text = text.replace(/%%c/gi, '⌀');
+      text = text.replace(/%%d/gi, '°');
+      text = text.replace(/%%p/gi, '±');
+      return text.replace(/\s+/g, ' ').trim();
+    };
+
+    // Semantic role descriptor based on CAD layer and attributes
+    const getLayerRole = (layerName, colorCode) => {
+      const l = (layerName || '').toUpperCase();
+      if (l.includes('تنظيم') || l.includes('REG') || l.includes('BOUND')) {
+        return { ar: 'خط تنظيم معتمد ومسار نزع ملكية', en: 'Regulatory Approved Boundary', color: '#00E5FF' };
+      }
+      if (l.includes('ROAD') || l.includes('طريق') || l.includes('TRAFFIC')) {
+        return { ar: 'مسار تحويلة الطريق وحارات السير', en: 'Detour Road Corridor & Lanes', color: '#FFD600' };
+      }
+      if (l.includes('SIGN') || l.includes('لوح')) {
+        return { ar: 'لوحة مرورية وتحذيرية', en: 'Traffic Signboard', color: '#00E676' };
+      }
+      if (l.includes('HATCH') || l.includes('WORK') || l.includes('عمل')) {
+        return { ar: 'نطاق أعمال حفر وإنشاءات', en: 'Excavation & Work Zone', color: '#FF1744' };
+      }
+      if (l.includes('CADR-YEL') || l.includes('YEL')) {
+        return { ar: 'حواجز توجيهية وخطوط تحذيرية صفراء', en: 'Warning Delineators & Barriers', color: '#FF9100' };
+      }
+      return { ar: 'عنصر مخطط هندسي تنفيذي', en: 'Engineering Plan Geometry', color: aciToHex(colorCode) || '#00FFFF' };
+    };
+
+    // Recursive entity processor to handle blocks (INSERT) with full hierarchy & rotation
+    const processEntities = (entities, transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 }, depth = 0) => {
+      if (depth > 6) return;
+      (entities || []).forEach((entity, idx) => {
+      try {
+        const colorIdx = entity.colorIndex !== undefined ? entity.colorIndex : (entity.color !== undefined ? entity.color : 7);
+        const hexCol = aciToHex(colorIdx);
+        const roleInfo = getLayerRole(entity.layer, colorIdx);
+
+        const props = {
+          layer: entity.layer || '0',
+          type: entity.type,
+          colorIndex: colorIdx,
+          color: hexCol,
+          roleAr: roleInfo.ar,
+          roleEn: roleInfo.en,
+          depth,
+          id: `${depth}_${idx}`
+        };
+
+        const applyTransform = (pt) => {
+          if (!pt) return null;
+          let x = pt.x * transform.scaleX;
+          let y = pt.y * transform.scaleY;
+          if (transform.rotation !== 0) {
+            const cosA = Math.cos(transform.rotation);
+            const sinA = Math.sin(transform.rotation);
+            const nx = x * cosA - y * sinA;
+            const ny = x * sinA + y * cosA;
+            x = nx;
+            y = ny;
+          }
+          x += transform.x;
+          y += transform.y;
+          return { x, y };
+        };
+
+        switch (entity.type) {
+          case 'LINE': {
+            if (!entity.vertices || entity.vertices.length < 2) break;
+            const p1 = applyTransform(entity.vertices[0]);
+            const p2 = applyTransform(entity.vertices[1]);
+            if (!isPtValid(p1) || !isPtValid(p2)) break;
+
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const lengthMeters = Math.hypot(dx, dy);
+            const bearing = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360;
+
+            const [lat1, lng1] = toLatLng(p1.x, p1.y);
+            const [lat2, lng2] = toLatLng(p2.x, p2.y);
+
+            features.push({
+              type: 'Feature',
+              properties: {
+                ...props,
+                lengthMeters: Number(lengthMeters.toFixed(2)),
+                bearingDeg: Math.round(bearing),
+                startUtm: { x: Number(p1.x.toFixed(1)), y: Number(p1.y.toFixed(1)) },
+                endUtm: { x: Number(p2.x.toFixed(1)), y: Number(p2.y.toFixed(1)) }
+              },
+              geometry: { type: 'LineString', coordinates: [[lng1, lat1], [lng2, lat2]] }
+            });
+            break;
+          }
+          case 'LWPOLYLINE':
+          case 'POLYLINE': {
+            if (!entity.vertices || entity.vertices.length < 2) break;
+            const pts = entity.vertices.map(applyTransform);
+            if (!pts.every(isPtValid)) break;
+
+            let totalLength = 0;
+            for (let i = 1; i < pts.length; i++) {
+              totalLength += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+            }
+
+            const coords = pts.map(tp => {
+              const [lat, lng] = toLatLng(tp.x, tp.y);
+              return [lng, lat];
+            });
+
+            const isClosed = entity.shape || (entity.type === 'LWPOLYLINE' && entity.vertices.length > 2 && pts.length >= 3);
+            if (isClosed) {
+              const first = coords[0];
+              const last = coords[coords.length - 1];
+              if (first[0] !== last[0] || first[1] !== last[1]) {
+                coords.push([...first]);
+              }
+              features.push({
+                type: 'Feature',
+                properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length, isClosed: true },
+                geometry: { type: 'Polygon', coordinates: [coords] }
+              });
+            } else {
+              features.push({
+                type: 'Feature',
+                properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length },
+                geometry: { type: 'LineString', coordinates: coords }
+              });
+            }
+            break;
+          }
+          case 'CIRCLE': {
+            if (!entity.center || !entity.radius) break;
+            const tp = applyTransform(entity.center);
+            if (!isPtValid(tp)) break;
+            const [lat, lng] = toLatLng(tp.x, tp.y);
+            features.push({
+              type: 'Feature',
+              properties: { ...props, radius: entity.radius * Math.abs(transform.scaleX), utm: { x: Number(tp.x.toFixed(1)), y: Number(tp.y.toFixed(1)) } },
+              geometry: { type: 'Point', coordinates: [lng, lat] }
+            });
+            break;
+          }
+          case 'ARC': {
+            if (!entity.center || !entity.radius) break;
+            const startAngle = (entity.startAngle || 0) * Math.PI / 180;
+            const endAngle = (entity.endAngle || 360) * Math.PI / 180;
+            const cx = entity.center.x;
+            const cy = entity.center.y;
+            const segments = 32;
+            let totalAngle = endAngle - startAngle;
+            if (totalAngle <= 0) totalAngle += 2 * Math.PI;
+            const arcCoords = [];
+            let valid = true;
+            for (let i = 0; i <= segments; i++) {
+              const angle = startAngle + (totalAngle * i / segments);
+              const px = cx + entity.radius * Math.cos(angle);
+              const py = cy + entity.radius * Math.sin(angle);
+              const tp = applyTransform({ x: px, y: py });
+              if (!isPtValid(tp)) { valid = false; break; }
+              const [lat, lng] = toLatLng(tp.x, tp.y);
+              arcCoords.push([lng, lat]);
+            }
+            if (valid && arcCoords.length > 0) {
+              const arcLength = (totalAngle) * entity.radius;
+              features.push({
+                type: 'Feature',
+                properties: { ...props, lengthMeters: Number(arcLength.toFixed(2)), radius: entity.radius },
+                geometry: { type: 'LineString', coordinates: arcCoords }
+              });
+            }
+            break;
+          }
+          case 'TEXT':
+          case 'MTEXT': {
+            const pos = entity.position || entity.startPoint;
+            if (!pos) break;
+            const tp = applyTransform(pos);
+            if (!isPtValid(tp)) break;
+            const [lat, lng] = toLatLng(tp.x, tp.y);
+            const cleaned = cleanDxfText(entity.text || entity.string || '');
+            if (!cleaned) break;
+
+            const netRotation = ((entity.rotation || 0) + (transform.rotation * 180 / Math.PI)) % 360;
+
+            let tagType = 'label';
+            if (cleaned.includes('منطقة') || cleaned.includes('Zone') || cleaned.includes('TRANSITION') || cleaned.includes('العمل')) {
+              tagType = 'zone';
+            } else if (/\b\d+\s*M\b/i.test(cleaned) || /\bM\s*\d+\b/i.test(cleaned)) {
+              tagType = 'dimension';
+            } else if (cleaned.startsWith('N:') || cleaned.startsWith('E:')) {
+              tagType = 'coordinate';
+            }
+
+            features.push({
+              type: 'Feature',
+              properties: {
+                ...props,
+                text: cleaned,
+                tagType,
+                rotationDeg: Math.round(netRotation),
+                height: entity.height || 1,
+                utm: { x: Number(tp.x.toFixed(1)), y: Number(tp.y.toFixed(1)) }
+              },
+              geometry: { type: 'Point', coordinates: [lng, lat] }
+            });
+            break;
+          }
+          case 'SOLID': {
+            const corners = [entity.corner1 || entity.firstCorner, entity.corner2 || entity.secondCorner, entity.corner3 || entity.thirdCorner, entity.corner4 || entity.fourthCorner].filter(c => c && typeof c.x === 'number');
+            if (corners.length >= 3) {
+              const pts = corners.map(applyTransform);
+              if (pts.every(isPtValid)) {
+                const coords = pts.map(tp => {
+                  const [lat, lng] = toLatLng(tp.x, tp.y);
+                  return [lng, lat];
+                });
+                coords.push([...coords[0]]);
+                features.push({
+                  type: 'Feature',
+                  properties: { ...props, isSolid: true, fillColor: hexCol },
+                  geometry: { type: 'Polygon', coordinates: [coords] }
+                });
+              }
+            }
+            break;
+          }
+          case 'INSERT': {
+            const blockName = entity.name || entity.block;
+            if (!blockName || !dxf.blocks || !dxf.blocks[blockName]) break;
+            const block = dxf.blocks[blockName];
+            
+            const insertPos = entity.position || { x: 0, y: 0 };
+            const worldInsertPos = applyTransform(insertPos);
+            if (!isPtValid(worldInsertPos)) break;
+
+            const scaleX = entity.scale ? entity.scale.x : (entity.xScale || 1);
+            const scaleY = entity.scale ? entity.scale.y : (entity.yScale || 1);
+            const rotRad = entity.rotation ? (entity.rotation * Math.PI / 180) : 0;
+
+            const combinedTransform = {
+              x: worldInsertPos.x,
+              y: worldInsertPos.y,
+              scaleX: transform.scaleX * scaleX,
+              scaleY: transform.scaleY * scaleY,
+              rotation: transform.rotation + rotRad
+            };
+
+            processEntities(block.entities, combinedTransform, depth + 1);
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (e) {
+        console.warn(`[DWG Parser] Skipping entity ${idx} (${entity.type}): ${e.message}`);
+      }
+    });
+    };
+
+    // Kick off parsing
+    processEntities(dxf.entities);
+
+    // Smart Auto-Alignment: Detect surveyed tie-in control points
+    const controlPoints = [];
+    let curE = null, curN = null;
+    (dxf.entities || []).forEach(e => {
+      if (e.type === 'TEXT' || e.type === 'MTEXT') {
+        const text = e.text || e.string || '';
+        const eMatch = text.match(/E:\s*([0-9.]+)/i);
+        const nMatch = text.match(/N:\s*([0-9.]+)/i);
+        if (eMatch) curE = { val: parseFloat(eMatch[1]), rawPt: e.position || e.startPoint };
+        if (nMatch) curN = { val: parseFloat(nMatch[1]), rawPt: e.position || e.startPoint };
+        if (curE && curN) {
+          controlPoints.push({
+            targetLat: curN.val,
+            targetLng: curE.val,
+            cadPt: curN.rawPt || curE.rawPt
+          });
+          curE = null;
+          curN = null;
+        }
+      }
+    });
+
+    let autoAlignment = { hasControlPoints: false, dLat: 0, dLng: 0, rotationDeg: 0, controlPoints: [] };
+    if (controlPoints.length > 0 && coordSystem === 'utm37n') {
+      const regLine = (dxf.entities || []).find(e => e.type === 'LINE' && (e.layer === 'تنظيم' || e.layer === '1-ROAD'));
+      if (regLine && regLine.vertices?.length >= 2) {
+        const [p1Lat, p1Lng] = toLatLng(regLine.vertices[0].x, regLine.vertices[0].y);
+        const targetPt = controlPoints[0];
+        const dLat = targetPt.targetLat - p1Lat;
+        const dLng = targetPt.targetLng - p1Lng;
+        if (Math.abs(dLat) < 0.005 && Math.abs(dLng) < 0.005) {
+          autoAlignment = {
+            hasControlPoints: true,
+            dLat: Number(dLat.toFixed(7)),
+            dLng: Number(dLng.toFixed(7)),
+            rotationDeg: 0,
+            controlPoints
+          };
+          console.log(`[Smart Alignment] Auto-detected ${controlPoints.length} ground control points. Shift: dLat=${dLat.toFixed(7)}, dLng=${dLng.toFixed(7)}`);
+        }
+      }
+    }
+
+    const geojson = {
+      type: 'FeatureCollection',
+      features
+    };
+
+    // Calculate clean GPS bounding box
+    const [swLat, swLng] = toLatLng(minX, minY);
+    const [neLat, neLng] = toLatLng(maxX, maxY);
+    const gpsBounds = [
+      [Math.min(swLat, neLat), Math.min(swLng, neLng)],
+      [Math.max(swLat, neLat), Math.max(swLng, neLng)]
+    ];
+    const centerLatLng = toLatLng(geomCenterX, geomCenterY);
+
+    const result = {
+      success: true,
+      fileName,
+      fileSize,
+      coordSystem,
+      bbox: { minX, maxX, minY, maxY },
+      gpsBounds,
+      centerLatLng,
+      autoAlignment,
+      layers,
+      entityCounts: {},
+      totalEntities: dxf.entities?.length || 0,
+      totalFeatures: features.length,
+      geojson
+    };
+
+    // Count entity types
+    (dxf.entities || []).forEach(e => {
+      result.entityCounts[e.type] = (result.entityCounts[e.type] || 0) + 1;
+    });
+
+    console.log(`[DWG Parser] Success: ${features.length} GeoJSON features from ${dxf.entities?.length} entities`);
+    res.json(result);
+  } catch (err) {
+    console.error('[DWG Parser] Error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to parse DWG file' });
+  }
+});
+
+// --- VISION AI ALIGNMENT (Option 3) ---
+app.post('/api/ai-align', async (req, res) => {
+  try {
+    const { cadImage, mapImage } = req.body;
+    if (!cadImage || !mapImage) {
+      return res.status(400).json({ success: false, error: 'Missing images' });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      // Mock response if no key is provided
+      console.log('[Vision AI] No API key found, returning mock alignment data.');
+      return res.json({ success: true, dLat: 0.0001, dLng: 0.0001, rotationDeg: 0 });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    // Strip base64 prefix
+    const cadBase64 = cadImage.replace(/^data:image\/\w+;base64,/, "");
+    const mapBase64 = mapImage.replace(/^data:image\/\w+;base64,/, "");
+
+    const prompt = `You are a spatial alignment AI. I am providing you with two images:
+1. A blueprint (CAD drawing).
+2. A satellite map of a road.
+Your task is to mathematically determine how to translate (shift) and rotate the blueprint so it perfectly aligns with the physical roads in the satellite map. 
+Return ONLY a valid JSON object with the following keys:
+- "dLat": (number) The latitude offset needed (typically very small, e.g., 0.00005).
+- "dLng": (number) The longitude offset needed.
+- "rotationDeg": (number) The rotation in degrees needed.
+Do not include markdown blocks or any other text. Just the JSON object.`;
+
+    console.log('[Vision AI] Sending images to Gemini...');
+    const response = await ai.models.generateContent({
+      model: 'gemma-4-31b-it',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                data: cadBase64,
+                mimeType: 'image/png'
+              }
+            },
+            {
+              inlineData: {
+                data: mapBase64,
+                mimeType: 'image/png'
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    const aiText = response.text || '';
+    console.log('[Vision AI] Gemini response received.');
+    
+    // Parse JSON from response
+    const jsonStr = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const result = JSON.parse(jsonStr);
+    
+    console.log('[Vision AI] Parsed Result:', result);
+
+    res.json({
+      success: true,
+      dLat: result.dLat || 0,
+      dLng: result.dLng || 0,
+      rotationDeg: result.rotationDeg || 0
+    });
+  } catch (error) {
+    console.error('[Vision AI] Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to align images using AI' });
   }
 });
 
