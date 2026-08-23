@@ -24,10 +24,10 @@ export const RoadAutocomplete = ({ language = 'ar', value, onChange, onSelect })
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Debounced search
+  // Ultra-fast instant search (80ms debounce with local 0ms GIS cache)
   useEffect(() => {
     const timeoutId = setTimeout(async () => {
-      if (query.trim().length >= 2 && isOpen) {
+      if (query.trim().length >= 1 && isOpen) {
         setIsLoading(true);
         const searchResults = await geocodingService.searchRoads(query);
         setResults(searchResults);
@@ -35,7 +35,7 @@ export const RoadAutocomplete = ({ language = 'ar', value, onChange, onSelect })
       } else {
         setResults([]);
       }
-    }, 500);
+    }, 80);
     return () => clearTimeout(timeoutId);
   }, [query, isOpen]);
 

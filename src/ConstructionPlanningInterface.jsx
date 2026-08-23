@@ -54,7 +54,8 @@ import {
   Info,
   ClipboardCheck,
   Bell,
-  Signpost
+  Signpost,
+  RefreshCw
 } from 'lucide-react';
 
 import PreApprovalChecklist from './PreApprovalChecklist';
@@ -70,6 +71,10 @@ import TrafficReferenceGuide from './TrafficReferenceGuide';
 import FieldReadinessModal from './FieldReadinessModal';
 import ProcessHomeScreen from './ProcessHomeScreen';
 import DwgMapOverlay from './DwgMapOverlay';
+import CadSmartImportDropzone from './CadSmartImportDropzone';
+import SixDofNodeInspector from './components/SixDofNodeInspector';
+import SixDofGizmo from './components/SixDofGizmo';
+import GeoreferencedReportModal from './components/GeoreferencedReportModal';
 import { RoadAutocomplete } from './components/RoadAutocomplete';
 import {
   DURATION_CATEGORIES,
@@ -698,11 +703,16 @@ const ConstructionPlanningInterface = () => {
   const [aiFeedback, setAiFeedback] = useState({ ar: '', en: '' });
   const nodesStateRef = useRef({ b: 0, d: 0, p: 0 });
 
-  // Construction boundary points (teal, up to 4 nodes, used in Phase 2 GIS)
+  // 6-DOF Geospatial State
+  const [selected6DofNode, setSelected6DofNode] = useState(null);
+  const [showGeoreferencedReport, setShowGeoreferencedReport] = useState(false);
+  const [resetConfirmModal, setResetConfirmModal] = useState({ isOpen: false, targetLayer: null });
+
+  // Construction boundary points (Blue, up to 4 nodes with 6-DOF coordinates)
   const [boundaryPoints, setBoundaryPoints] = useState([]);
-  // Detour route nodes (orange): D1 = Start, D2 = End — set on Phase 1 map
+  // Detour route nodes (Orange): D1 = Start, D2 = End with 6-DOF coordinates
   const [detourNodes, setDetourNodes] = useState([]);
-  // Pedestrian route nodes (green): P1 = Start, P2 = End — set on Phase 1 map
+  // Pedestrian route nodes (Green): P1 = Start, P2 = End with 6-DOF coordinates
   const [pedestrianNodes, setPedestrianNodes] = useState([]);
 
   useEffect(() => {
@@ -722,6 +732,104 @@ const ConstructionPlanningInterface = () => {
   const [newMilestone, setNewMilestone] = useState({ taskAr: '', taskEn: '', startDay: '', durationDays: '', status: 'Planned' });
   const [editingMilestoneId, setEditingMilestoneId] = useState(null);
   const [editMilestoneForm, setEditMilestoneForm] = useState({ taskAr: '', taskEn: '', startDay: 1, durationDays: 5 });
+  const [isGeneratingPhases, setIsGeneratingPhases] = useState(false);
+  const [phasingAiSuccess, setPhasingAiSuccess] = useState(false);
+  const [phasingAiError, setPhasingAiError] = useState('');
+
+  const handleGeneratePhasingWithAi = async () => {
+    setIsGeneratingPhases(true);
+    setPhasingAiError('');
+    setPhasingAiSuccess(false);
+
+    const start = formData.workStartDate ? new Date(formData.workStartDate) : new Date();
+    const end = formData.workEndDate ? new Date(formData.workEndDate) : new Date(Date.now() + 68 * 86400000);
+    const durationHours = Math.max(24, Math.round((end - start) / (1000 * 60 * 60))) || 1632;
+
+    const payload = {
+      project_name: language === 'ar' ? (formData.projectNameAr || 'مشروع التحويلة المرورية') : (formData.projectNameEn || 'Traffic Detour & Safety Plan'),
+      road_classification: formData.roadClassification || 'Main / Expressway',
+      traffic_volume: formData.trafficVolumeLevel || 'High',
+      speed_limit_kmh: parseFloat(formData.speedLimit) || 80,
+      excavation_depth_cm: parseFloat(formData.excavationDepth) || 200,
+      total_duration_hours: durationHours,
+      work_start_date: formData.workStartDate || '2026-08-30',
+      work_end_date: formData.workEndDate || '2026-11-06',
+      total_lanes: parseFloat(formData.totalLanesCount) || 3,
+      closed_lanes: parseFloat(formData.closedLanesCount) || 1,
+      apiKey: googleApiKey
+    };
+
+    try {
+      const response = await fetch('/api/generate-phasing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.success && Array.isArray(data.phases) && data.phases.length > 0) {
+        const mapped = data.phases.map((p, idx) => ({
+          id: Date.now() + idx,
+          taskAr: p.phase_name_ar || p.taskAr || `المرحلة ${idx + 1}`,
+          taskEn: p.phase_name_en || p.taskEn || `Phase ${idx + 1}`,
+          startDay: parseInt(p.start_day) || 1,
+          durationDays: parseInt(p.duration_days) || 1,
+          status: 'Planned'
+        }));
+        setMilestones(mapped);
+        setPhasingAiSuccess(true);
+        setTimeout(() => setPhasingAiSuccess(false), 6000);
+      } else {
+        throw new Error(data.error || 'Failed to parse AI milestones');
+      }
+    } catch (err) {
+      console.error('[AI Phasing] Error:', err);
+      // Direct REST fallback if client key exists
+      if (googleApiKey) {
+        try {
+          const restRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${googleApiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `Act as an MOT-certified Saudi Traffic Management and Detour Phasing Engineer. Given project metadata: ${JSON.stringify(payload)}, generate an optimal sequential phasing schedule compliant with Saudi Road Code 305. Return ONLY a valid JSON array containing objects with "phase_name_ar", "phase_name_en", "start_day", "duration_days".`
+                }]
+              }]
+            })
+          });
+          const restData = await restRes.json();
+          const restText = restData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const cleaned = restText.replace(/```json/g, '').replace(/```/g, '').trim();
+          const phases = JSON.parse(cleaned);
+          if (Array.isArray(phases) && phases.length > 0) {
+            const mapped = phases.map((p, idx) => ({
+              id: Date.now() + idx,
+              taskAr: p.phase_name_ar || p.taskAr,
+              taskEn: p.phase_name_en || p.taskEn,
+              startDay: parseInt(p.start_day) || 1,
+              durationDays: parseInt(p.duration_days) || 1,
+              status: 'Planned'
+            }));
+            setMilestones(mapped);
+            setPhasingAiSuccess(true);
+            setTimeout(() => setPhasingAiSuccess(false), 6000);
+            setIsGeneratingPhases(false);
+            return;
+          }
+        } catch (restErr) {
+          console.error('[AI Phasing] Direct REST fallback failed:', restErr);
+        }
+      }
+      setPhasingAiError(language === 'ar' ? 'تعذر التوليد الذكي. يرجى التحقق من الاتصال بالخادم.' : 'Failed to generate phases. Please check connection.');
+    } finally {
+      setIsGeneratingPhases(false);
+    }
+  };
 
   const getMilestoneStart = (m, lang = language) => {
     if (m.startDay !== undefined) {
@@ -936,11 +1044,195 @@ const ConstructionPlanningInterface = () => {
     }
   };
 
-  // State for CAD file analysis (real DWG parsing via DwgMapOverlay)
+  // State for CAD file analysis (real DWG parsing via Step 1 Dropzone & DwgMapOverlay)
   const [cadFile, setCadFile] = useState(null);
   const [cadStatus, setCadStatus] = useState('idle'); // idle, parsing, parsed, error
   const [cadMetadata, setCadMetadata] = useState(null);
   const [cadAcknowledged, setCadAcknowledged] = useState(false);
+  const [sharedDwgData, setSharedDwgData] = useState(null);
+  const [sharedDwgFileName, setSharedDwgFileName] = useState('');
+  const [sharedExtractedInfo, setSharedExtractedInfo] = useState(null);
+
+  const handleCadAutoExtract = (extractedInfo, fullDwgData, fileName) => {
+    setSharedDwgData(fullDwgData);
+    setSharedDwgFileName(fileName);
+    setSharedExtractedInfo(extractedInfo);
+
+    if (extractedInfo) {
+      setFormData(prev => ({
+        ...prev,
+        // Phase 1: General Project Details
+        clientNameAr: extractedInfo.clientNameAr || prev.clientNameAr || 'أمانة منطقة المدينة المنورة',
+        clientNameEn: extractedInfo.clientNameEn || prev.clientNameEn || 'Al-Madinah Al-Munawwarah Municipality',
+        projectNameAr: extractedInfo.projectNameAr || prev.projectNameAr || `مشروع اعتماد وتأمين التحويلة المرورية - ${extractedInfo.streetNameAr || ''}`,
+        projectNameEn: extractedInfo.projectNameEn || prev.projectNameEn || `Traffic Detour & Safety Plan - ${extractedInfo.streetNameEn || ''}`,
+        contractingCompanyAr: extractedInfo.contractingCompanyAr || prev.contractingCompanyAr || 'شركة مقاولات البنية التحتية بالمدينة المنورة',
+        contractingCompanyEn: extractedInfo.contractingCompanyEn || prev.contractingCompanyEn || 'Madinah Infrastructure & Contracting Co.',
+        consultantNameAr: extractedInfo.consultantNameAr || prev.consultantNameAr || 'المكتب الهندسي الاستشاري المعتمد - دار الإشراف',
+        consultantNameEn: extractedInfo.consultantNameEn || prev.consultantNameEn || 'Engineering Supervision Consultants',
+        projectManagerAr: extractedInfo.projectManagerAr || prev.projectManagerAr || 'م. فهد الحربي',
+        projectManagerEn: extractedInfo.projectManagerEn || prev.projectManagerEn || 'Eng. Fahad Al-Harbi',
+        ownerClassification: extractedInfo.ownerClassification || prev.ownerClassification || 'affiliated',
+        roadNameAr: extractedInfo.streetNameAr || prev.roadNameAr,
+        roadNameEn: extractedInfo.streetNameEn || prev.roadNameEn,
+        locationAr: extractedInfo.locationAr || prev.locationAr,
+        locationEn: extractedInfo.locationEn || prev.locationEn,
+        coordinates: extractedInfo.coordinates || prev.coordinates,
+        permitStartDate: extractedInfo.permitStartDate || prev.permitStartDate,
+        permitEndDate: extractedInfo.permitEndDate || prev.permitEndDate,
+        workStartDate: extractedInfo.workStartDate || prev.workStartDate,
+        workEndDate: extractedInfo.workEndDate || prev.workEndDate,
+        detailedTimeline: extractedInfo.detailedTimeline || prev.detailedTimeline,
+
+        // Phase 1: Road Classification & Nature
+        workPurposeAr: extractedInfo.workPurposeAr || prev.workPurposeAr || 'أعمال حفر وتمديد مرافق البنية التحتية والربط المروري',
+        workPurposeEn: extractedInfo.workPurposeEn || prev.workPurposeEn || 'Infrastructure utilities trench excavation and road corridor integration',
+        owningUtilityAr: extractedInfo.owningUtilityAr || prev.owningUtilityAr || 'الإدارة العامة للمشاريع والصيانة - أمانة منطقة المدينة المنورة',
+        owningUtilityEn: extractedInfo.owningUtilityEn || prev.owningUtilityEn || 'General Directorate of Projects & Road Maintenance',
+        roadClassification: extractedInfo.roadClassification || prev.roadClassification || 'main',
+        trafficVolumeLevel: extractedInfo.trafficVolumeLevel || prev.trafficVolumeLevel || 'high',
+        workDurationCategory: extractedInfo.workDurationCategory || prev.workDurationCategory || 'medium',
+        diversionLengthM: extractedInfo.dimensions?.totalDetourLengthM || prev.diversionLengthM,
+        pedestrianPathProvided: true,
+        pedestrianPathWidth: 1.5,
+
+        // Phase 1: Dimensions & Clearances
+        siteLength: extractedInfo.dimensions?.totalDetourLengthM || prev.siteLength,
+        siteWidth: extractedInfo.dimensions?.siteWidthM || prev.siteWidth || 35,
+        lateralClearance: extractedInfo.dimensions?.lateralClearanceM || prev.lateralClearance || 2.5,
+        longitudinalBuffer: extractedInfo.dimensions?.longitudinalBufferM || prev.longitudinalBuffer || 130,
+        trenchLength: extractedInfo.dimensions?.trenchLengthM || prev.trenchLength || 60,
+        trenchWidth: extractedInfo.dimensions?.trenchWidthM || prev.trenchWidth || 4.2,
+        closedLaneWidth: extractedInfo.dimensions?.closedLaneWidthM || prev.closedLaneWidth || 3.75,
+        closedLanesCount: extractedInfo.dimensions?.closedLanesCount || prev.closedLanesCount || 1,
+        activeLanesCount: extractedInfo.dimensions?.activeLanesCount || prev.activeLanesCount || 2,
+        activeLanesLeftCount: extractedInfo.dimensions?.activeLanesLeftCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.floor(extractedInfo.dimensions.activeLanesCount / 2)) : 1),
+        activeLanesRightCount: extractedInfo.dimensions?.activeLanesRightCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.ceil(extractedInfo.dimensions.activeLanesCount / 2)) : 1),
+        detourLanesPlacement: extractedInfo.dimensions?.detourLanesPlacement || (extractedInfo.isMultiLaneDivided ? 'dual' : 'right'),
+        totalLanesCount: extractedInfo.dimensions?.totalLanesCount || prev.totalLanesCount || 3,
+        stagingAreaAr: `ساحة التشوين والمعدات المعتمدة بالقرب من بداية مسار ${extractedInfo.streetNameAr || ''}`,
+        stagingAreaEn: `Approved material staging area near detour approach - ${extractedInfo.streetNameEn || ''}`,
+        hardZoneClassAr: 'منطقة الحفر المفتوح (عالية الخطورة - خندق محمي بالصبات)',
+        hardZoneClassEn: 'Open Excavation Trench (High Hazard - Jersey Barrier Protected)',
+
+        // Phase 2: Barrier & Trench Plate Engineering
+        excavationDepth: 200,
+        barrierLateralClearance: 0.8,
+        steelPlateThickness: 30,
+        bearingWidthLeft: 40,
+        bearingWidthRight: 40,
+        flushMillingDepth: 30,
+        antiSlipApplied: true,
+        mechanicalAnchoring: true,
+        isArterialRoad: true,
+        attenuatorType: 'mash_tl3',
+        attenuatorQuantityPlacement: '2 وحدات MASH TL-3 عند نقطة بداية التدرج ومحيط منطقة الأمان',
+        hasDetourLightingSensors: true,
+        lightingLuxTarget: '150',
+        lightingTowerSpacing: '30m',
+        lightingAlertChannel: 'central_platform',
+        lightingBackupPower: '15 kVA Silent Automatic Generator',
+
+        // Phase 3: Calculator & Traffic Strategy
+        speedLimit: extractedInfo.speedLimit || prev.speedLimit || 80,
+        proposedTaper: extractedInfo.zones?.transition?.lengthM || prev.proposedTaper || 180,
+        proposedBuffer: extractedInfo.zones?.buffer?.lengthM || prev.proposedBuffer || 130,
+        proposedTermination: extractedInfo.zones?.termination?.lengthM || prev.proposedTermination || 30,
+        laneWidth: 3.6,
+        roadClosureAr: extractedInfo.plans?.roadClosureAr || prev.roadClosureAr,
+        roadClosureEn: extractedInfo.plans?.roadClosureEn || prev.roadClosureEn,
+        trafficFlowPlanAr: extractedInfo.plans?.trafficFlowPlanAr || prev.trafficFlowPlanAr,
+        trafficFlowPlanEn: extractedInfo.plans?.trafficFlowPlanEn || prev.trafficFlowPlanEn,
+        tempBridgesAr: extractedInfo.plans?.tempBridgesAr || prev.tempBridgesAr,
+        lightingPlanAr: extractedInfo.plans?.lightingPlanAr || prev.lightingPlanAr,
+        sideStreetsPlanAr: extractedInfo.plans?.sideStreetsPlanAr || prev.sideStreetsPlanAr,
+        pedestrianStart: `محطة 0+050 (${extractedInfo.coordinates || ''})`,
+        pedestrianEnd: `محطة 0+${(extractedInfo.dimensions?.totalDetourLengthM || 290) - 30}`,
+        vehicleStart: `محطة 0+000 (${extractedInfo.coordinates || ''})`,
+        vehicleEnd: `محطة 0+${extractedInfo.dimensions?.totalDetourLengthM || 290}`,
+        externalPermitDocName: fileName ? `${fileName} (مخطط الأوتوكاد المعتمد)` : prev.externalPermitDocName,
+
+        fiveWaysStrategy: extractedInfo.zones ? [
+          `1. Advance Warning: Signs placed at 500m.`,
+          `2. Transition Area: Taper length of ${extractedInfo.zones.transition?.lengthM || 180}m utilizing channelizers and illuminated plastic barriers.`,
+          `3. Buffer Space: ${extractedInfo.zones.buffer?.lengthM || 20}m longitudinal safety buffer strictly kept clear.`,
+          `4. Work Area: Excavation length ${extractedInfo.zones.workArea?.lengthM || 60}m (width ${extractedInfo.zones.workArea?.widthM || 4.2}m) protected by solid concrete barriers.`,
+          `5. Termination Area: ${extractedInfo.zones.termination?.lengthM || 30}m downstream taper ending with 'END ROAD WORK' signage.`
+        ].join('\n') : prev.fiveWaysStrategy
+      }));
+
+      if (extractedInfo.equipmentList && extractedInfo.equipmentList.length > 0) {
+        setEquipmentList(extractedInfo.equipmentList);
+      }
+
+      if (extractedInfo.latitude && extractedInfo.longitude) {
+        setBoundaryPoints([{
+          lat: extractedInfo.latitude,
+          lng: extractedInfo.longitude,
+          id: Date.now()
+        }]);
+      }
+    }
+  };
+
+  const handleFieldFocus = (fieldName) => {
+    if (['clientNameAr', 'contractingCompanyAr', 'consultantNameAr', 'projectNameAr', 'roadNameAr', 'ownerClassification', 'locationAr', 'permitStartDate', 'permitEndDate', 'workStartDate', 'workEndDate'].includes(fieldName)) {
+      setExpandedPanels(prev => ({ ...prev, p1_general: true }));
+    } else if (['workPurposeAr', 'owningUtilityAr', 'roadClassification', 'trafficVolumeLevel', 'workDurationCategory'].includes(fieldName)) {
+      setExpandedPanels(prev => ({ ...prev, p1_roadwork: true }));
+    } else if (['siteLength', 'siteWidth', 'lateralClearance', 'longitudinalBuffer', 'trenchLength', 'trenchWidth', 'closedLaneWidth', 'activeLanesCount'].includes(fieldName)) {
+      setExpandedPanels(prev => ({ ...prev, p1_equipment: true }));
+    }
+
+    setTimeout(() => {
+      const el = document.querySelector(`[name="${fieldName}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+        el.classList.add('ring-4', 'ring-amber-400', 'bg-amber-100/60');
+        setTimeout(() => {
+          el.classList.remove('ring-4', 'ring-amber-400', 'bg-amber-100/60');
+        }, 3000);
+      }
+    }, 150);
+  };
+
+  const isFieldMissing = (fieldName) => {
+    const val = formData[fieldName];
+    return val === undefined || val === null || (typeof val === 'string' && val.trim() === '') || (typeof val === 'number' && val === 0);
+  };
+
+  const renderFieldHeader = (label, fieldName, isRequired = true) => {
+    const missing = isRequired && isFieldMissing(fieldName);
+    return (
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <label className="block text-xs font-bold text-slate-700 uppercase">
+          {label}
+        </label>
+        {missing ? (
+          <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs animate-pulse">
+            <span>⚠️</span>
+            <span>{language === 'ar' ? 'مطلوب استكماله' : 'Required'}</span>
+          </span>
+        ) : (
+          <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5">
+            <Check className="h-3 w-3" />
+            <span>{language === 'ar' ? 'مكتمل' : 'Done'}</span>
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const getFieldInputClass = (fieldName, isRequired = true, extraClass = '') => {
+    const missing = isRequired && isFieldMissing(fieldName);
+    const base = 'block w-full rounded-lg text-xs transition p-2.5 ';
+    if (missing) {
+      return base + 'bg-amber-50/40 border-2 border-amber-300 focus:border-amber-500 focus:ring-amber-200 text-slate-900 font-medium ' + extraClass;
+    }
+    return base + 'bg-white border border-slate-300 focus:border-brand-primary text-slate-900 ' + extraClass;
+  };
+
   // State for traffic element placements from DWG Map Overlay
   const [dwgPlacements, setDwgPlacements] = useState([]);
 
@@ -950,19 +1242,31 @@ const ConstructionPlanningInterface = () => {
   // Collapsible Panels (Accordion) States
   const [expandedPanels, setExpandedPanels] = useState({
     // Phase 1
-    p1_general: false,
+    p1_general: true,
     p1_roadwork: false,
     p1_equipment: false,
     p1_gantt: false,
-    p1_map: false,
-    // Phase 2
-    p2_blueprint: false,
-    p2_crosssection: false,
+    // Phase 2 (Blueprint & Cross-Section open by default)
+    p2_blueprint: true,
+    p2_crosssection: true,
     // Phase 3
-    p3_calculator: false,
+    p3_calculator: true,
     p3_auditor: false,
     p3_photos: false
   });
+
+  const getIsArterialTriggered = (data = formData) => {
+    const start = data.workStartDate ? new Date(data.workStartDate) : null;
+    const end = data.workEndDate ? new Date(data.workEndDate) : null;
+    const calculatedHours = (start && end) ? Math.max(0, (end - start) / (1000 * 60 * 60)) : 0;
+
+    const isArterialRoadClass = data.roadClassification === 'main' || data.roadClassification === 'arterial';
+    const isHighSpeed = parseFloat(data.speedLimit) >= 80;
+    const isLongTerm = data.workDurationCategory === 'long' || calculatedHours > 72;
+    const isLongDetour = parseFloat(data.diversionLengthM) > 400;
+
+    return Boolean(isArterialRoadClass || isHighSpeed || isLongTerm || isLongDetour);
+  };
 
   const isPanelComplete = (panelName) => {
     if (panelName === 'p1_general') {
@@ -981,17 +1285,28 @@ const ConstructionPlanningInterface = () => {
     if (panelName === 'p1_roadwork') {
       const purposeOk = !!(language === 'ar' ? formData.workPurposeAr : formData.workPurposeEn);
       const utilityOk = !!(language === 'ar' ? formData.owningUtilityAr : formData.owningUtilityEn);
-      const pedestrianOk = !isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) || !!formData.pedestrianPathProvided;
+      const pedestrianOk = formData.includePedestrianPath === false || !isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) || !!formData.pedestrianPathProvided;
       return purposeOk && utilityOk && pedestrianOk;
     }
     if (panelName === 'p1_equipment') {
-      return !!formData.lightingLuxTarget;
+      if (!getIsArterialTriggered(formData)) {
+        return true; // Non-arterial / standard roads: optional
+      }
+      // Saudi Road Code 305 Enforcement: Mandatory when criteria are triggered
+      const attenuatorOk = Boolean(
+        formData.isArterialRoad && 
+        formData.attenuatorType && 
+        (formData.attenuatorType !== 'other' || formData.attenuatorTypeCustomEn || formData.attenuatorTypeCustomAr)
+      );
+      const lightingOk = Boolean(
+        formData.hasDetourLightingSensors && 
+        formData.lightingLuxTarget && 
+        formData.lightingAlertChannel
+      );
+      return attenuatorOk && lightingOk;
     }
     if (panelName === 'p1_gantt') {
       return milestones.length > 0;
-    }
-    if (panelName === 'p1_map') {
-      return boundaryPoints.length >= 4 && detourNodes.length >= 2 && pedestrianNodes.length >= 2;
     }
     if (panelName === 'p2_blueprint') {
       return cadStatus === 'parsed' || cadFile !== null;
@@ -1007,19 +1322,21 @@ const ConstructionPlanningInterface = () => {
   const isPhaseComplete = (phase) => {
     if (DEV_SKIP_VALIDATION) return true;
     if (phase === 1) {
-      return isPanelComplete('p1_general') && isPanelComplete('p1_equipment') && isPanelComplete('p1_gantt') && isPanelComplete('p1_map');
+      return isPanelComplete('p1_general') && isPanelComplete('p1_roadwork') && isPanelComplete('p1_gantt');
     }
     if (phase === 2) {
       return isPanelComplete('p2_blueprint');
     }
     if (phase === 3) {
-      return isPanelComplete('p3_calculator') && isPanelComplete('p3_auditor');
+      const arterialRequired = getIsArterialTriggered(formData);
+      const arterialOk = !arterialRequired || isPanelComplete('p1_equipment');
+      return isPanelComplete('p3_calculator') && isPanelComplete('p3_auditor') && arterialOk;
     }
     return true;
   };
 
   const togglePanel = (panelName) => {
-    // Plain independent toggle \u2014 no blocking, no accordion. Any number of
+    // Plain independent toggle — no blocking, no accordion. Any number of
     // sections can be open at once; each one just opens/closes on its own.
     setExpandedPanels(prev => ({ ...prev, [panelName]: !prev[panelName] }));
   };
@@ -1097,15 +1414,19 @@ const ConstructionPlanningInterface = () => {
     pedestrianEnd: 'Sta 0+355 (E582810, N2703810)',
     vehicleStart: 'Sta 0+000 (E582500, N2703800)',
     vehicleEnd: 'Sta 0+450 (E582900, N2703800)',
-    // Traffic Safety Calculator states
+    // Traffic Safety Calculator states & Cross-Section
     speedLimit: 80,         // km/h (40, 60, 80, 100, 120)
     closedLaneWidth: 3.6,    // meters
     proposedTaper: 180,      // meters
     proposedBuffer: 130,     // meters (Stopping Sight Distance)
     proposedTermination: 30, // meters (Min 30m)
-    activeLanesCount: 2,     // active lanes to remain open
+    detourLanesPlacement: 'dual', // 'dual' (Left & Right) | 'right' | 'left'
+    activeLanesCount: 2,     // active lanes to remain open total
+    activeLanesLeftCount: 1, // active detour lanes on the left side
+    activeLanesRightCount: 1,// active detour lanes on the right side
     laneWidth: 3.6,          // meters per active lane
     pedestrianPathWidth: 1.5,// meters
+    pedestrianPlacement: 'right', // 'left' | 'right' | 'both'
     // Arterial Road & Crash Protection Fields
     isArterialRoad: true,
     attenuatorType: 'mash_tl3',
@@ -1864,13 +2185,42 @@ const ConstructionPlanningInterface = () => {
           iconSize: [prefix==='C'?26:28, prefix==='C'?26:28], iconAnchor: [prefix==='C'?13:14, prefix==='C'?13:14]
         })
       });
-      mk.bindTooltip(`<b style="color:${color}">${prefix}${i+1} — ${labels[i]}</b><br/><span style="font-family:monospace;font-size:10px">Lat: ${p.lat.toFixed(5)}<br/>Lng: ${p.lng.toFixed(5)}</span>`, { permanent: false });
+      mk.bindTooltip(`<b style="color:${color}">${prefix}${i+1} — ${labels[i]}</b><br/><span style="font-family:monospace;font-size:10px">Lat: ${p.lat.toFixed(5)}<br/>Lng: ${p.lng.toFixed(5)}</span><br/><span style="color:#38bdf8;font-size:9px;font-weight:bold">انقر لضبط إحداثيات 6-DOF</span>`, { permanent: false });
+      
+      mk.on('click', () => {
+        setSelected6DofNode({
+          id: `${prefix}${i+1}`,
+          label: labels[i] || `${prefix}${i+1}`,
+          layer: prefix === 'C' ? 'construction' : prefix === 'D' ? 'detour' : 'pedestrian',
+          lat: p.lat,
+          lng: p.lng,
+          x: p.x || Math.round(582500 + (p.lng - 39.6120) * 100000),
+          y: p.y || Math.round(2703800 + (p.lat - 24.4686) * 110000),
+          z: p.z || 0.0,
+          roll: p.roll || 0.0,
+          pitch: p.pitch || 0.0,
+          yaw: p.yaw || 0.0,
+          prefix,
+          index: i
+        });
+      });
+
       mk.on('dragend', e => {
         const { lat, lng } = e.target.getLatLng();
         setFn(prev => {
           const u=[...prev]; 
           if(u[i]) {
-            u[i]={...u[i],lat,lng,x:Math.round(582500+(lng-39.612)*100000),y:Math.round(2703800+(lat-24.4686)*110000)};
+            u[i]={
+              ...u[i],
+              lat,
+              lng,
+              x: Math.round(582500+(lng-39.612)*100000),
+              y: Math.round(2703800+(lat-24.4686)*110000),
+              z: u[i].z || 0.0,
+              roll: u[i].roll || 0.0,
+              pitch: u[i].pitch || 0.0,
+              yaw: u[i].yaw || 0.0
+            };
             if (prefix === 'D') {
               if (i === 0) setFormData(f => ({...f, vehicleStart: `Sta 0+000 (E${u[i].x}, N${u[i].y})`}));
               if (i === 1) setFormData(f => ({...f, vehicleEnd: `Sta 0+450 (E${u[i].x}, N${u[i].y})`}));
@@ -1924,30 +2274,204 @@ const ConstructionPlanningInterface = () => {
 
 
 
-  // Initialize and update the report map when proposal is submitted (Satellite Imagery)
+  // Initialize and update the report map when proposal is submitted (High-Definition Satellite & CAD Overlay)
   useEffect(() => {
     if (submitted && window.L && reportMapContainerRef.current && !reportMapInstance.current) {
-      const lat = boundaryPoints.length > 0 ? boundaryPoints[0].lat : 24.4686;
-      const lng = boundaryPoints.length > 0 ? boundaryPoints[0].lng : 39.6120;
+      const originLat = sharedDwgData?.centerLatLng ? sharedDwgData.centerLatLng[0] : (boundaryPoints.length > 0 ? boundaryPoints[0].lat : 24.4686);
+      const originLng = sharedDwgData?.centerLatLng ? sharedDwgData.centerLatLng[1] : (boundaryPoints.length > 0 ? boundaryPoints[0].lng : 39.6120);
+      const cosLat = Math.cos(originLat * Math.PI / 180);
+      const mToLat = 1 / 110574.61;
+      const mToLng = 1 / (111320 * cosLat);
       
       const map = window.L.map(reportMapContainerRef.current, {
-        center: [lat, lng],
-        zoom: 16,
-        zoomControl: false,
+        center: [originLat, originLng],
+        zoom: 17,
+        zoomControl: true,
         attributionControl: false,
-        dragging: false,
+        dragging: true,
         scrollWheelZoom: false
       });
 
-      window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        maxZoom: 20,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-        attribution: 'Map data &copy; Google Maps Satellite'
+      window.L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&scale=2', {
+        maxZoom: 22,
+        subdomains: ['0', '1', '2', '3'],
+        tileSize: 512,
+        zoomOffset: -1
       }).addTo(map);
 
       reportMapInstance.current = map;
       reportMarkersGroupRef.current = window.L.layerGroup().addTo(map);
 
+      // 1. Render CAD GeoJSON Overlay if available
+      if (sharedDwgData?.geojson) {
+        const cadLayer = window.L.geoJSON(sharedDwgData.geojson, {
+          style: (feature) => {
+            const props = feature.properties || {};
+            const layerName = (props.layer || '').toUpperCase();
+            let color = '#EAB308';
+            let weight = 2.5;
+
+            if (layerName.includes('DETOUR') || layerName.includes('TAPER') || layerName.includes('DIVERT')) {
+              color = '#EF4444';
+              weight = 3.5;
+            } else if (layerName.includes('BORDER') || layerName.includes('ROAD') || layerName.includes('CURB')) {
+              color = '#06B6D4';
+              weight = 2;
+            } else if (layerName.includes('BUFFER') || layerName.includes('WORK')) {
+              color = '#F59E0B';
+              weight = 3;
+            }
+
+            return {
+              color,
+              weight,
+              opacity: 0.95,
+              fillColor: 'transparent',
+              fillOpacity: 0
+            };
+          }
+        }).addTo(map);
+
+        try {
+          const cadBounds = cadLayer.getBounds();
+          if (cadBounds && cadBounds.isValid()) {
+            map.fitBounds(cadBounds, { padding: [40, 40], maxZoom: 18 });
+          }
+        } catch {}
+      }
+
+      // 2. Render Sketched Working Area & Zones on the Report Map (Following Real CAD Yellow Line "منطقة عمل")
+      const allFeats = sharedDwgData?.geojson?.features || [];
+      const yellowWork = allFeats.filter(f => {
+        const p = f.properties || {};
+        const col = (p.color || '').toUpperCase();
+        const layer = (p.layer || '').toUpperCase();
+        const isYellow = p.colorIndex === 2 || col === '#FFFF00' || col === '#FFD700' || col === '#FFD600';
+        const isWorkLayer = layer.includes('عمل') || layer.includes('WORK') || layer.includes('TRENCH') || layer.includes('60');
+        return (isYellow || isWorkLayer) && (f.geometry?.type === 'LineString' || f.geometry?.type === 'Polygon');
+      });
+
+      const redTapers = allFeats.filter(f => {
+        const p = f.properties || {};
+        const col = (p.color || '').toUpperCase();
+        const layer = (p.layer || '').toUpperCase();
+        const isRed = p.colorIndex === 1 || col === '#FF0000' || col === '#EF4444' || col === '#DC2626';
+        const isTaperLayer = layer.includes('انتقال') || layer.includes('TAPER') || layer.includes('DETOUR') || layer.includes('50') || layer.includes('180');
+        return (isRed || isTaperLayer) && (f.geometry?.type === 'LineString' || f.geometry?.type === 'Polygon');
+      });
+
+      if (yellowWork.length > 0) {
+        yellowWork.forEach(feat => {
+          const raw = feat.geometry?.type === 'Polygon' ? feat.geometry.coordinates[0] : feat.geometry.coordinates;
+          if (!raw || raw.length < 2) return;
+          const latlngList = raw.map(c => [c[1], c[0]]);
+
+          // Glowing yellow line
+          window.L.polyline(latlngList, {
+            color: '#FACC15',
+            weight: 6,
+            opacity: 1.0
+          }).addTo(map);
+
+          // Corridor buffer polygon around yellow line
+          const corridor = [];
+          for (let i = 0; i < latlngList.length - 1; i++) {
+            const p1 = latlngList[i];
+            const p2 = latlngList[i + 1];
+            const dy = (p2[0] - p1[0]) * 110574.61;
+            const dx = (p2[1] - p1[1]) * (111320 * cosLat);
+            const len = Math.hypot(dx, dy) || 1;
+            const nx = (-dy / len) * 2.1 * mToLng;
+            const ny = (dx / len) * 2.1 * mToLat;
+
+            if (i === 0) corridor.push([p1[0] + ny, p1[1] + nx]);
+            corridor.push([p2[0] + ny, p2[1] + nx]);
+          }
+          for (let i = latlngList.length - 1; i > 0; i--) {
+            const p1 = latlngList[i - 1];
+            const p2 = latlngList[i];
+            const dy = (p2[0] - p1[0]) * 110574.61;
+            const dx = (p2[1] - p1[1]) * (111320 * cosLat);
+            const len = Math.hypot(dx, dy) || 1;
+            const nx = (-dy / len) * 2.1 * mToLng;
+            const ny = (dx / len) * 2.1 * mToLat;
+
+            corridor.push([p2[0] - ny, p2[1] - nx]);
+            if (i === 1) corridor.push([p1[0] - ny, p1[1] - nx]);
+          }
+
+          if (corridor.length >= 3) {
+            window.L.polygon(corridor, {
+              color: '#F59E0B',
+              weight: 2,
+              opacity: 0.9,
+              fillColor: '#F59E0B',
+              fillOpacity: 0.32,
+              dashArray: '4, 4'
+            }).addTo(map);
+          }
+
+          const mid = latlngList[Math.floor(latlngList.length / 2)];
+          window.L.marker(mid, {
+            icon: window.L.divIcon({
+              className: 'report-zone-badge',
+              html: `<div style="
+                background: rgba(245, 158, 11, 0.95);
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 3px 8px;
+                border-radius: 5px;
+                border: 1px solid #ffffff;
+                box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+                white-space: nowrap;
+              ">
+                🚧 ${language === 'ar' ? 'منطقة العمل (60M)' : 'Work Zone (60M)'}
+              </div>`,
+              iconSize: [150, 22],
+              iconAnchor: [75, 11]
+            })
+          }).addTo(map);
+        });
+      }
+
+      if (redTapers.length > 0) {
+        redTapers.forEach(feat => {
+          const raw = feat.geometry?.type === 'Polygon' ? feat.geometry.coordinates[0] : feat.geometry.coordinates;
+          if (!raw || raw.length < 2) return;
+          const latlngList = raw.map(c => [c[1], c[0]]);
+
+          window.L.polyline(latlngList, {
+            color: '#EF4444',
+            weight: 4.5,
+            opacity: 1.0
+          }).addTo(map);
+
+          const mid = latlngList[Math.floor(latlngList.length / 2)];
+          window.L.marker(mid, {
+            icon: window.L.divIcon({
+              className: 'report-zone-badge',
+              html: `<div style="
+                background: rgba(239, 68, 68, 0.92);
+                color: #ffffff;
+                font-size: 10.5px;
+                font-weight: 800;
+                padding: 3px 7px;
+                border-radius: 5px;
+                border: 1px solid #ffffff;
+                box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+                white-space: nowrap;
+              ">
+                📐 ${language === 'ar' ? 'المنطقة الانتقالية (50M)' : 'Transition Zone (50M)'}
+              </div>`,
+              iconSize: [140, 22],
+              iconAnchor: [70, 11]
+            })
+          }).addTo(map);
+        });
+      }
+
+      // 3. Boundary Points if available
       const latlngs = [];
       boundaryPoints.forEach((p, index) => {
         latlngs.push([p.lat, p.lng]);
@@ -1970,8 +2494,11 @@ const ConstructionPlanningInterface = () => {
           weight: 3,
           dashArray: '4, 4'
         }).addTo(map);
-        map.fitBounds(reportPolygonLayerRef.current.getBounds(), { padding: [20, 20] });
       }
+
+      // Ensure layout invalidation on open
+      setTimeout(() => { if (reportMapInstance.current) reportMapInstance.current.invalidateSize(); }, 150);
+      setTimeout(() => { if (reportMapInstance.current) reportMapInstance.current.invalidateSize(); }, 400);
     }
 
     return () => {
@@ -1980,7 +2507,7 @@ const ConstructionPlanningInterface = () => {
         reportMapInstance.current = null;
       }
     };
-  }, [submitted, boundaryPoints]);
+  }, [submitted, boundaryPoints, sharedDwgData, language]);
 
   // Inspector Dashboard Satellite Map Loader (With invalidateSize fix to prevent blank map)
   useEffect(() => {
@@ -2282,6 +2809,108 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     setFormData(f => ({ ...f, trafficPlacements: placements }));
   };
 
+  // 6-DOF Node Coordinate & Orientation Synchronization
+  const handle6DofNodeChange = (updatedNode) => {
+    if (!updatedNode) return;
+    const { prefix, index } = updatedNode;
+
+    if (prefix === 'C') {
+      setBoundaryPoints(prev => {
+        const u = [...prev];
+        if (u[index]) {
+          u[index] = { ...u[index], ...updatedNode };
+        }
+        return u;
+      });
+    } else if (prefix === 'D') {
+      setDetourNodes(prev => {
+        const u = [...prev];
+        if (u[index]) {
+          u[index] = { ...u[index], ...updatedNode };
+          if (index === 0) setFormData(f => ({ ...f, vehicleStart: `Sta 0+000 (E${updatedNode.x}, N${updatedNode.y})` }));
+          if (index === 1) setFormData(f => ({ ...f, vehicleEnd: `Sta 0+450 (E${updatedNode.x}, N${updatedNode.y})` }));
+        }
+        return u;
+      });
+    } else if (prefix === 'P') {
+      setPedestrianNodes(prev => {
+        const u = [...prev];
+        if (u[index]) {
+          u[index] = { ...u[index], ...updatedNode };
+          if (index === 0) setFormData(f => ({ ...f, pedestrianStart: `Sta 0+050 (E${updatedNode.x}, N${updatedNode.y})` }));
+          if (index === 1) setFormData(f => ({ ...f, pedestrianEnd: `Sta 0+355 (E${updatedNode.x}, N${updatedNode.y})` }));
+        }
+        return u;
+      });
+    }
+  };
+
+  // Granular Layer Reset Handlers
+  const handleResetConstructionArea = () => {
+    setBoundaryPoints([]);
+    if (selected6DofNode?.prefix === 'C') setSelected6DofNode(null);
+  };
+
+  const handleResetDetourRoute = () => {
+    setDetourNodes([]);
+    if (selected6DofNode?.prefix === 'D') setSelected6DofNode(null);
+  };
+
+  const handleResetPedestrianRoute = () => {
+    setPedestrianNodes([]);
+    if (selected6DofNode?.prefix === 'P') setSelected6DofNode(null);
+  };
+
+  // Reset created 6-DOF nodes (detour & pedestrian) while leaving construction boundary polygon intact
+  const handleResetNodesOnly = () => {
+    setDetourNodes([]);
+    setPedestrianNodes([]);
+    if (selected6DofNode && selected6DofNode.prefix !== 'C') setSelected6DofNode(null);
+  };
+
+  // Snap to nearest CAD geometry vertex within search radius
+  const handleSnapToNearestVertex = (node) => {
+    if (!sharedDwgData?.geojson?.features || !node) return;
+    let closestPt = null;
+    let minDist = Infinity;
+
+    sharedDwgData.geojson.features.forEach(f => {
+      const coords = f.geometry?.coordinates;
+      if (!coords) return;
+      const checkCoord = (pt) => {
+        if (Array.isArray(pt) && pt.length >= 2 && typeof pt[0] === 'number') {
+          const dist = Math.hypot(pt[1] - node.lat, pt[0] - node.lng);
+          if (dist < minDist) {
+            minDist = dist;
+            closestPt = { lat: pt[1], lng: pt[0] };
+          }
+        }
+      };
+
+      if (f.geometry.type === 'Point') checkCoord(coords);
+      else if (f.geometry.type === 'LineString') coords.forEach(checkCoord);
+      else if (f.geometry.type === 'Polygon') (coords[0] || []).forEach(checkCoord);
+    });
+
+    if (closestPt && minDist < 0.005) {
+      handle6DofNodeChange({
+        ...node,
+        lat: Number(closestPt.lat.toFixed(6)),
+        lng: Number(closestPt.lng.toFixed(6)),
+        x: Math.round(582500 + (closestPt.lng - 39.6120) * 100000),
+        y: Math.round(2703800 + (closestPt.lat - 24.4686) * 110000)
+      });
+    }
+  };
+
+  const handleResetAllNodes = () => {
+    setBoundaryPoints([]);
+    setDetourNodes([]);
+    setPedestrianNodes([]);
+    setSelected6DofNode(null);
+    setResetConfirmModal({ isOpen: false, targetLayer: null });
+  };
+
   const addMilestone = () => {
     if (newMilestone.taskEn && newMilestone.startEn) {
       setMilestones([...milestones, { 
@@ -2446,7 +3075,7 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     if (!(language === 'ar' ? formData.owningUtilityAr : formData.owningUtilityEn)) {
       issues.push(language === 'ar' ? 'الجهة المالكة للخدمة غير محددة.' : 'Owning utility/service is not specified.');
     }
-    if (isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && !formData.pedestrianPathProvided) {
+    if (formData.includePedestrianPath !== false && isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && !formData.pedestrianPathProvided) {
       issues.push(language === 'ar' ? 'طول التحويلة يتجاوز 400م ولم يتم تأكيد توفير ممر مشاة.' : 'Diversion length exceeds 400m and a pedestrian path has not been confirmed.');
     }
     return issues;
@@ -2536,98 +3165,291 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     setSubmitted(true);
   };
 
-  // 2D Engineering Cross-Section Visualizer (Dynamically data-bound to permit data or active form)
+  // 2D Engineering Cross-Section Visualizer (High-Resolution, Enlarged & Centered)
   const renderCrossSectionSVG = (isLightBg = false, customPermit = null) => {
     const activeData = customPermit || formData;
-    const latClearance = parseFloat(activeData.lateralClearance) || 25;
-    const workWidth = parseFloat(activeData.siteWidth) || 80;
-    
-    const activeLanes = parseInt(activeData.activeLanesCount) || 2;
+    const placement = activeData.detourLanesPlacement || 'dual';
+    const latClearance = parseFloat(activeData.lateralClearance) || 2.5;
+    const trenchW = parseFloat(activeData.trenchWidth) || 4.2;
+
+    const activeLanesTotal = parseInt(activeData.activeLanesCount) || 2;
+    const leftLanesCount = placement === 'right' ? 0
+      : (parseInt(activeData.activeLanesLeftCount) || (placement === 'dual' ? Math.max(1, Math.floor(activeLanesTotal / 2)) : activeLanesTotal));
+    const rightLanesCount = placement === 'left' ? 0
+      : (parseInt(activeData.activeLanesRightCount) || (placement === 'dual' ? Math.max(1, Math.ceil(activeLanesTotal / 2)) : activeLanesTotal));
+
     const laneWidthValue = parseFloat(activeData.laneWidth) || 3.6;
+    const hasPed = activeData.includePedestrianPath !== false && activeData.pedestrianPathProvided !== false;
     const pedPathWidthValue = parseFloat(activeData.pedestrianPathWidth) || 1.5;
-    
-    const pedWidthPx = Math.min(100, Math.max(30, pedPathWidthValue * 30));
-    const barrierWidthPx = 15;
-    const clearanceWidthPx = Math.min(100, Math.max(35, latClearance * 2));
-    const workWidthPx = Math.min(180, Math.max(70, workWidth * 1.2));
-    const laneWidthPx = Math.min(250, Math.max(60, activeLanes * laneWidthValue * 12.5));
-    const totalWidth = pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx + laneWidthPx + 30;
-    
-    const height = 180;
-    const roadY = 130;
-    
-    const startOfLanes = 10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx + barrierWidthPx;
-    const laneLines = [];
-    for (let i = 1; i < activeLanes; i++) {
-      const lineX = startOfLanes + (i * laneWidthPx / activeLanes);
-      laneLines.push(
-        <line key={i} x1={lineX} y1={roadY} x2={lineX} y2={roadY + 5} stroke="#e2e8f0" strokeWidth="1.5" strokeDasharray="3 3" />
-      );
+
+    // Component widths scaled up for a high-definition large viewport
+    const laneUnitW = Math.max(170, Math.min(230, laneWidthValue * 52)); // ~185px per single lane
+    const barrierW = 32;
+    const clearanceW = Math.max(55, Math.min(90, latClearance * 24)); // ~60px
+    const trenchPixelW = Math.max(220, Math.min(340, trenchW * 52)); // ~220px
+    const pedW = hasPed ? Math.max(130, Math.min(180, pedPathWidthValue * 85)) : 0; // ~130px or 0 if omitted
+
+    const leftTotalW = leftLanesCount > 0 ? leftLanesCount * laneUnitW : 0;
+    const rightTotalW = rightLanesCount > 0 ? rightLanesCount * laneUnitW : 0;
+
+    // Calculate total content width
+    let contentWidth = 0;
+    if (placement === 'dual') {
+      contentWidth = leftTotalW + (leftLanesCount > 0 ? barrierW : 0) + clearanceW + trenchPixelW + clearanceW + (rightLanesCount > 0 ? barrierW : 0) + rightTotalW + pedW;
+    } else if (placement === 'left') {
+      contentWidth = leftTotalW + (leftLanesCount > 0 ? barrierW : 0) + clearanceW + trenchPixelW + clearanceW + pedW;
+    } else { // right
+      contentWidth = pedW + clearanceW + trenchPixelW + clearanceW + (rightLanesCount > 0 ? barrierW : 0) + rightTotalW;
     }
 
-    const firstLaneCenter = startOfLanes + (laneWidthPx / activeLanes) / 2;
+    // Canvas size (Enlarged Height & Width)
+    const TOTAL_CANVAS_W = Math.max(980, contentWidth + 120);
+    const TOTAL_CANVAS_H = 340;
+    const startMargin = (TOTAL_CANVAS_W - contentWidth) / 2;
+    const roadY = 220; // Road surface base Y
+    const isAr = language === 'ar';
+
+    // Layout positions
+    let curX = startMargin;
+    let leftLanesX = 0, leftBarrierX = 0, workZoneX = 0, rightBarrierX = 0, rightLanesX = 0, pedPathX = 0;
+
+    if (placement === 'dual') {
+      leftLanesX = curX; curX += leftTotalW;
+      if (leftLanesCount > 0) { leftBarrierX = curX; curX += barrierW; }
+      workZoneX = curX; curX += clearanceW + trenchPixelW + clearanceW;
+      if (rightLanesCount > 0) { rightBarrierX = curX; curX += barrierW; }
+      rightLanesX = curX; curX += rightTotalW;
+      if (hasPed) { pedPathX = curX; curX += pedW; }
+    } else if (placement === 'left') {
+      leftLanesX = curX; curX += leftTotalW;
+      if (leftLanesCount > 0) { leftBarrierX = curX; curX += barrierW; }
+      workZoneX = curX; curX += clearanceW + trenchPixelW + clearanceW;
+      if (hasPed) { pedPathX = curX; curX += pedW; }
+    } else { // right
+      if (hasPed) { pedPathX = curX; curX += pedW; }
+      workZoneX = curX; curX += clearanceW + trenchPixelW + clearanceW;
+      if (rightLanesCount > 0) { rightBarrierX = curX; curX += barrierW; }
+      rightLanesX = curX; curX += rightTotalW;
+    }
+
+    const wzStart = workZoneX + clearanceW;
+    const trenchCX = wzStart + trenchPixelW / 2;
+
+    // Helper: Large Lane block renderer
+    const renderLaneBlock = (startX, blockW, count, labelLine1, labelLine2) => {
+      const singleW = blockW / count;
+      const dividers = [];
+      for (let i = 1; i < count; i++) {
+        const lx = startX + i * singleW;
+        dividers.push(
+          <line key={i} x1={lx} y1={roadY} x2={lx} y2={roadY + 12} stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 4" />
+        );
+      }
+      const cx = startX + blockW / 2;
+      return (
+        <g key={`lanes-${startX}`}>
+          {/* Road Asphalt */}
+          <rect x={startX} y={roadY} width={blockW} height="12" fill="#1e293b" />
+          {dividers}
+          {/* Vehicle Sprite (Enlarged) */}
+          <rect x={cx - 27} y={roadY - 38} width="54" height="28" rx="6" fill="#0284c7" stroke="#0369a1" strokeWidth="1.5" />
+          <rect x={cx - 14} y={roadY - 35} width="20" height="15" rx="2" fill="#bae6fd" />
+          {/* Headlights */}
+          <rect x={cx + 23} y={roadY - 24} width="3" height="6" rx="1" fill="#fef08a" />
+          <rect x={cx - 26} y={roadY - 24} width="3" height="6" rx="1" fill="#ef4444" />
+          {/* Wheels */}
+          <circle cx={cx - 16} cy={roadY - 10} r="5" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
+          <circle cx={cx + 16} cy={roadY - 10} r="5" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
+
+          {/* Bottom Labels */}
+          <text x={cx} y={roadY + 30} fill={isLightBg ? '#1e293b' : '#f8fafc'} fontSize="13" fontWeight="800" textAnchor="middle">
+            {labelLine1}
+          </text>
+          <text x={cx} y={roadY + 48} fill={isLightBg ? '#475569' : '#94a3b8'} fontSize="11" className="font-mono font-bold" textAnchor="middle">
+            {labelLine2}
+          </text>
+        </g>
+      );
+    };
+
+    // Helper: Concrete Jersey Barrier (Enlarged)
+    const renderBarrier = (bx, keyId) => (
+      <polygon
+        key={keyId}
+        points={`${bx},${roadY} ${bx + 6},${roadY - 48} ${bx + barrierW - 6},${roadY - 48} ${bx + barrierW},${roadY}`}
+        fill="url(#cs-barrier-hatch-large)"
+        stroke="#64748b"
+        strokeWidth="2"
+      />
+    );
 
     return (
-      <svg viewBox={`0 0 ${totalWidth} ${height}`} className={`w-full h-auto rounded-xl border ${isLightBg ? 'bg-slate-50 border-slate-250 text-slate-900' : 'bg-slate-950 border-brand-dark-hover text-white'}`}>
+      <svg
+        viewBox={`0 0 ${TOTAL_CANVAS_W} ${TOTAL_CANVAS_H}`}
+        className={`w-full h-auto rounded-xl border ${isLightBg ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800 shadow-2xl'}`}
+      >
         <defs>
-          <marker id="arrow-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 10 0 L 0 5 L 10 10 z" fill="#bfa260"/>
+          <marker id="cs-gold-arr-s" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 10 0 L 0 5 L 10 10 z" fill="#d4af37" />
           </marker>
-          <marker id="arrow-end" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#bfa260"/>
+          <marker id="cs-gold-arr-e" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#d4af37" />
           </marker>
-          <pattern id="barrier-pattern" width="10" height="10" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
-            <line x1="0" y1="0" x2="0" y2="10" stroke="#6b7280" strokeWidth="2" />
+          <pattern id="cs-barrier-hatch-large" width="10" height="10" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="10" height="10" fill="#475569" />
+            <line x1="0" y1="0" x2="0" y2="10" stroke="#94a3b8" strokeWidth="3" />
+          </pattern>
+          <pattern id="cs-buffer-hatch-large" width="10" height="10" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="10" height="10" fill="#fef3c7" />
+            <line x1="0" y1="0" x2="0" y2="10" stroke="#fde68a" strokeWidth="4" />
           </pattern>
         </defs>
 
-        <rect x="10" y={roadY - 10} width={pedWidthPx} height="10" fill="#e2e8f0" stroke="#cbd5e1" strokeWidth="1" />
-        <circle cx={10 + pedWidthPx / 2} cy={roadY - 26} r="4" fill="#016b68" />
-        <line x1={10 + pedWidthPx / 2} y1={roadY - 22} x2={10 + pedWidthPx / 2} y2={roadY - 14} stroke="#016b68" strokeWidth="2" />
-        <line x1={10 + pedWidthPx / 2} y1={roadY - 18} x2={10 + pedWidthPx / 2 - 4} y2={roadY - 12} stroke="#016b68" strokeWidth="1.5" />
-        <line x1={10 + pedWidthPx / 2} y1={roadY - 18} x2={10 + pedWidthPx / 2 + 4} y2={roadY - 12} stroke="#016b68" strokeWidth="1.5" />
-        <line x1={10 + pedWidthPx / 2} y1={roadY - 14} x2={10 + pedWidthPx / 2 - 3} y2={roadY - 10} stroke="#016b68" strokeWidth="1.5" />
-        <line x1={10 + pedWidthPx / 2} y1={roadY - 14} x2={10 + pedWidthPx / 2 + 3} y2={roadY - 10} stroke="#016b68" strokeWidth="1.5" />
-        
-        <polygon points={`${10 + pedWidthPx},${roadY} ${10 + pedWidthPx + 3},${roadY - 25} ${10 + pedWidthPx + barrierWidthPx - 3},${roadY - 25} ${10 + pedWidthPx + barrierWidthPx},${roadY}`} fill="url(#barrier-pattern)" stroke="#4b5563" strokeWidth="1" />
-        
-        <rect x={10 + pedWidthPx + barrierWidthPx} y={roadY - 3} width={clearanceWidthPx} height="3" fill="#fef3c7" stroke="#fde68a" />
-        <line x1={10 + pedWidthPx + barrierWidthPx} y1={roadY - 15} x2={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx} y2={roadY - 15} stroke="#bfa260" strokeWidth="1" strokeDasharray="3 3" />
+        {/* ══ BASE ROAD ASPHALT LINE ══ */}
+        <line x1={Math.max(10, startMargin - 40)} y1={roadY} x2={Math.min(TOTAL_CANVAS_W - 10, startMargin + contentWidth + 40)} y2={roadY} stroke="#475569" strokeWidth="4" />
 
-        <polygon points={`${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx},${roadY} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + 15},${roadY + 25} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx - 15},${roadY + 25} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx},${roadY}`} fill="#f8fafc" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="2 2" />
-        <path d={`M ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2 - 15} ${roadY - 5} L ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2} ${roadY - 35} L ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2 + 20} ${roadY - 20} L ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2 + 10} ${roadY - 5}`} stroke="#d97706" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-        <rect x={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2 - 25} y={roadY - 15} width="15" height="12" rx="2" fill="#d97706" stroke="#b45309" />
+        {/* ══ LEFT DETOUR LANES ══ */}
+        {leftLanesCount > 0 && renderLaneBlock(
+          leftLanesX,
+          leftTotalW,
+          leftLanesCount,
+          isAr ? 'مسار التحويلة الأيسر' : 'Left Detour Lanes',
+          isAr ? `${leftLanesCount} حارة × ${laneWidthValue}م` : `${leftLanesCount} × ${laneWidthValue}m`
+        )}
 
-        <polygon points={`${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx},${roadY} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx + 3},${roadY - 25} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx + barrierWidthPx - 3},${roadY - 25} ${10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx + barrierWidthPx},${roadY}`} fill="url(#barrier-pattern)" stroke="#4b5563" strokeWidth="1" />
+        {/* ══ LEFT NJ BARRIER ══ */}
+        {leftLanesCount > 0 && renderBarrier(leftBarrierX, 'left-bar')}
 
-        <rect x={startOfLanes} y={roadY} width={laneWidthPx} height="5" fill="#334155" />
-        {laneLines}
-        
-        <rect x={firstLaneCenter - 12} y={roadY - 18} width="24" height="13" rx="3" fill="#0284c7" />
-        <rect x={firstLaneCenter - 6} y={roadY - 16} width="8" height="9" fill="#e2e8f0" />
+        {/* ══ WORK & TRENCH ZONE ══ */}
+        {/* Left Buffer Clearance */}
+        <rect x={workZoneX} y={roadY - 6} width={clearanceW} height="6" fill="url(#cs-buffer-hatch-large)" />
+        {/* Right Buffer Clearance */}
+        <rect x={wzStart + trenchPixelW} y={roadY - 6} width={clearanceW} height="6" fill="url(#cs-buffer-hatch-large)" />
 
-        <line x1="0" y1={roadY} x2={totalWidth} y2={roadY} stroke="#94a3b8" strokeWidth="1.5" />
+        {/* Excavation Trench Pit */}
+        <polygon
+          points={`${wzStart},${roadY} ${wzStart + 20},${roadY + 52} ${wzStart + trenchPixelW - 20},${roadY + 52} ${wzStart + trenchPixelW},${roadY}`}
+          fill="#140f0c"
+          stroke="#ef4444"
+          strokeWidth="2.5"
+          strokeDasharray="6 3"
+        />
+        {/* Steel Trench Bridge Plate */}
+        <rect x={trenchCX - 45} y={roadY - 5} width="90" height="6.5" rx="1.5" fill="#64748b" stroke="#cbd5e1" strokeWidth="1.5" />
 
-        <line x1="10" y1="50" x2={10 + pedWidthPx} y2="50" stroke="#bfa260" strokeWidth="1" markerStart="url(#arrow-start)" markerEnd="url(#arrow-end)" />
-        <text x={10 + pedWidthPx / 2} y="44" fill="#bfa260" fontSize="8" fontWeight="bold" textAnchor="middle">{pedPathWidthValue}m</text>
+        {/* Excavator Machine Graphic (Enlarged) */}
+        <path
+          d={`M ${trenchCX - 14} ${roadY - 8} L ${trenchCX + 4} ${roadY - 60} L ${trenchCX + 38} ${roadY - 34} L ${trenchCX + 20} ${roadY - 8}`}
+          stroke="#d97706"
+          strokeWidth="5"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <rect x={trenchCX - 32} y={roadY - 30} width="28" height="22" rx="3" fill="#d97706" stroke="#92400e" strokeWidth="1.5" />
+        <rect x={trenchCX - 28} y={roadY - 26} width="12" height="12" rx="1.5" fill="#fef9c3" opacity="0.8" />
 
-        <line x1={10 + pedWidthPx + barrierWidthPx} y1="50" x2={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx} y2="50" stroke="#bfa260" strokeWidth="1" markerStart="url(#arrow-start)" markerEnd="url(#arrow-end)" />
-        <text x={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx / 2} y="44" fill="#bfa260" fontSize="8" fontWeight="bold" textAnchor="middle">{latClearance}m {t.svgBuffer}</text>
-
-        <line x1={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx} y1="30" x2={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx} y2="30" stroke="#bfa260" strokeWidth="1" markerStart="url(#arrow-start)" markerEnd="url(#arrow-end)" />
-        <text x={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2} y="24" fill="#bfa260" fontSize="8" fontWeight="bold" textAnchor="middle">{workWidth}m {t.svgWorkArea}</text>
-
-        <line x1={startOfLanes} y1="50" x2={totalWidth - 10} y2="50" stroke="#bfa260" strokeWidth="1" markerStart="url(#arrow-start)" markerEnd="url(#arrow-end)" />
-        <text x={startOfLanes + laneWidthPx / 2} y="44" fill="#bfa260" fontSize="8" fontWeight="bold" textAnchor="middle">
-          {language === 'ar'
-            ? `${activeLanes === 1 ? 'حارة واحدة' : activeLanes === 2 ? 'حارتين' : `${activeLanes} حارات`} × ${laneWidthValue}م`
-            : `${activeLanes}x ${laneWidthValue}m Lane${activeLanes > 1 ? 's' : ''}`}
+        {/* Work Zone Bottom Label */}
+        <text x={trenchCX} y={roadY + 76} fill="#ef4444" fontSize="13" fontWeight="800" textAnchor="middle">
+          {isAr ? `منطقة العمل وحفر الخندق (${trenchW}م)` : `Work & Trench Zone (${trenchW}m)`}
         </text>
 
-        <text x={10 + pedWidthPx / 2} y={roadY + 20} fill={isLightBg ? '#4b5563' : '#94a3b8'} fontSize="8" fontWeight="bold" textAnchor="middle">{t.svgPedPath}</text>
-        <text x={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx / 2} y={roadY + 20} fill={isLightBg ? '#4b5563' : '#94a3b8'} fontSize="8" fontWeight="bold" textAnchor="middle">{t.svgBuffer}</text>
-        <text x={10 + pedWidthPx + barrierWidthPx + clearanceWidthPx + workWidthPx / 2} y={roadY + 40} fill="#ef4444" fontSize="8" fontWeight="bold" textAnchor="middle">{t.svgHardZone}</text>
-        <text x={startOfLanes + laneWidthPx / 2} y={roadY + 20} fill={isLightBg ? '#4b5563' : '#94a3b8'} fontSize="8" fontWeight="bold" textAnchor="middle">{t.svgDetourLanes}</text>
+        {/* ══ RIGHT NJ BARRIER ══ */}
+        {rightLanesCount > 0 && renderBarrier(rightBarrierX, 'right-bar')}
+
+        {/* ══ RIGHT DETOUR LANES ══ */}
+        {rightLanesCount > 0 && renderLaneBlock(
+          rightLanesX,
+          rightTotalW,
+          rightLanesCount,
+          isAr ? 'مسار التحويلة الأيمن' : 'Right Detour Lanes',
+          isAr ? `${rightLanesCount} حارة × ${laneWidthValue}م` : `${rightLanesCount} × ${laneWidthValue}m`
+        )}
+
+        {/* ══ PEDESTRIAN PATH ══ */}
+        {pedW > 0 && (() => {
+          const pcx = pedPathX + pedW / 2;
+          return (
+            <g key="ped-zone">
+              {/* Elevated Walkway */}
+              <rect x={pedPathX} y={roadY - 18} width={pedW} height="18" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1.5" rx="2" />
+              {/* Pedestrian Silhouette (Enlarged) */}
+              <circle cx={pcx} cy={roadY - 48} r="6" fill="#0f766e" />
+              <line x1={pcx} y1={roadY - 42} x2={pcx} y2={roadY - 26} stroke="#0f766e" strokeWidth="3.2" />
+              <line x1={pcx} y1={roadY - 36} x2={pcx - 8} y2={roadY - 24} stroke="#0f766e" strokeWidth="2.4" />
+              <line x1={pcx} y1={roadY - 36} x2={pcx + 8} y2={roadY - 24} stroke="#0f766e" strokeWidth="2.4" />
+              <line x1={pcx} y1={roadY - 26} x2={pcx - 6} y2={roadY - 15} stroke="#0f766e" strokeWidth="2.4" />
+              <line x1={pcx} y1={roadY - 26} x2={pcx + 6} y2={roadY - 15} stroke="#0f766e" strokeWidth="2.4" />
+
+              {/* Pedestrian Bottom Labels */}
+              <text x={pcx} y={roadY + 30} fill={isLightBg ? '#1e293b' : '#f8fafc'} fontSize="13" fontWeight="800" textAnchor="middle">
+                {isAr ? 'ممر المشاة' : 'Pedestrian Path'}
+              </text>
+              <text x={pcx} y={roadY + 48} fill={isLightBg ? '#475569' : '#94a3b8'} fontSize="11" className="font-mono font-bold" textAnchor="middle">
+                {pedPathWidthValue}m
+              </text>
+            </g>
+          );
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            DIMENSION ARROWS & VALUES (ENLARGED & STAGGERED ZERO-COLLISION)
+            Row 1 (y = 30): Trench Width & Pedestrian Walkway
+            Row 2 (y = 80): Left Detour Lanes & Right Detour Lanes
+        ════════════════════════════════════════════════════════════════════ */}
+
+        {/* ROW 1: Trench Width Span (y = 30) */}
+        <g>
+          <line
+            x1={wzStart} y1="30" x2={wzStart + trenchPixelW} y2="30"
+            stroke="#d4af37" strokeWidth="2"
+            markerStart="url(#cs-gold-arr-s)" markerEnd="url(#cs-gold-arr-e)"
+          />
+          <text x={trenchCX} y="20" fill="#d4af37" fontSize="13" fontWeight="800" textAnchor="middle">
+            {trenchW}m {isAr ? 'عرض الحفر' : 'Trench Width'}
+          </text>
+        </g>
+
+        {/* ROW 1: Pedestrian Path Span (y = 30) */}
+        {pedW > 0 && (
+          <g>
+            <line
+              x1={pedPathX} y1="30" x2={pedPathX + pedW} y2="30"
+              stroke="#d4af37" strokeWidth="2"
+              markerStart="url(#cs-gold-arr-s)" markerEnd="url(#cs-gold-arr-e)"
+            />
+            <text x={pedPathX + pedW / 2} y="20" fill="#d4af37" fontSize="13" fontWeight="800" textAnchor="middle">
+              {pedPathWidthValue}m {isAr ? 'مشاة' : 'Ped'}
+            </text>
+          </g>
+        )}
+
+        {/* ROW 2: Left Detour Span (y = 80) */}
+        {leftLanesCount > 0 && (
+          <g>
+            <line
+              x1={leftLanesX} y1="80" x2={leftLanesX + leftTotalW} y2="80"
+              stroke="#d4af37" strokeWidth="2"
+              markerStart="url(#cs-gold-arr-s)" markerEnd="url(#cs-gold-arr-e)"
+            />
+            <text x={leftLanesX + leftTotalW / 2} y="70" fill="#d4af37" fontSize="13" fontWeight="800" textAnchor="middle">
+              {leftLanesCount} × {laneWidthValue}m ({isAr ? 'يسار' : 'Left'})
+            </text>
+          </g>
+        )}
+
+        {/* ROW 2: Right Detour Span (y = 80) */}
+        {rightLanesCount > 0 && (
+          <g>
+            <line
+              x1={rightLanesX} y1="80" x2={rightLanesX + rightTotalW} y2="80"
+              stroke="#d4af37" strokeWidth="2"
+              markerStart="url(#cs-gold-arr-s)" markerEnd="url(#cs-gold-arr-e)"
+            />
+            <text x={rightLanesX + rightTotalW / 2} y="70" fill="#d4af37" fontSize="13" fontWeight="800" textAnchor="middle">
+              {rightLanesCount} × {laneWidthValue}m ({isAr ? 'يمين' : 'Right'})
+            </text>
+          </g>
+        )}
       </svg>
     );
   };
@@ -2975,6 +3797,46 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               <h2 className="text-xl font-bold uppercase tracking-wider text-brand-dark border-b border-brand-gold/30 pb-2 inline-block">{t.officialPermitTitle}</h2>
             </div>
 
+            {/* TOP HERO MAP: High-Definition Satellite CAD Blueprint & Sketched Working Area */}
+            <div className="my-6 border border-slate-300 rounded-2xl overflow-hidden shadow-lg bg-slate-950">
+              <div className="bg-slate-900 px-4 py-2.5 flex items-center justify-between border-b border-slate-800 text-white text-xs">
+                <div className="flex items-center gap-2 font-bold text-brand-gold">
+                  <Compass className="h-4 w-4" />
+                  <span>{language === 'ar' ? '🗺️ المخطط الهندسي التفاعلي للتحويلة ونطاق العمل على القمر الصناعي (CAD GIS Blueprint)' : '🗺️ Interactive CAD Detour & Work Zone Satellite Blueprint'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] font-mono">
+                  <span className="bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/50">4K Sub-Meter HD</span>
+                  <span className="bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800/50">WGS84 UTM</span>
+                </div>
+              </div>
+
+              <div 
+                ref={reportMapContainerRef}
+                className="h-80 md:h-96 w-full relative z-0"
+                id="report-leaflet-map"
+              ></div>
+
+              <div className="bg-slate-900/90 backdrop-blur-md px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs border-t border-slate-800 text-slate-300">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="flex items-center gap-1 text-red-400 font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                    {language === 'ar' ? 'المنطقة الانتقالية (Taper Zone)' : 'Transition & Taper Zone'}
+                  </span>
+                  <span className="flex items-center gap-1 text-amber-400 font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                    {language === 'ar' ? 'منطقة العمل والحفر (Work Zone)' : 'Work & Trench Zone'}
+                  </span>
+                  <span className="flex items-center gap-1 text-cyan-400 font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+                    {language === 'ar' ? 'المنطقة الفاصلة (Buffer SSD)' : 'Buffer Safety Zone'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono">
+                  {sharedDwgData?.fileName || 'CAD_Blueprint.dwg'}
+                </div>
+              </div>
+            </div>
+
             {/* General Info table */}
             <div className="grid grid-cols-2 gap-y-4 gap-x-8 text-sm mt-6 border-b border-slate-200 pb-6">
               <div>
@@ -3004,18 +3866,12 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               </div>
             </div>
 
-            {/* GIS and CAD Verification */}
+            {/* GIS and CAD Verification Coordinates Summary */}
             <div className="mt-6 border-b border-slate-200 pb-6">
               <h3 className="text-sm font-bold text-brand-primary uppercase tracking-wide mb-2 flex items-center gap-1">
                 <Compass className="h-4 w-4" /> {t.section1Title}
               </h3>
               
-              <div 
-                ref={reportMapContainerRef}
-                className="h-64 rounded-xl border border-slate-250 mt-2 mb-4 overflow-hidden relative z-0"
-                id="report-leaflet-map"
-              ></div>
-
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs space-y-2">
                 <div>
                   <span className="font-bold text-slate-700">{language === 'ar' ? 'إحداثيات مضلع حدود التحويلة بنظام UTM-WGS84:' : 'WGS84 UTM Coordinate Boundary Polygon:'} </span>
@@ -3717,6 +4573,17 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             {currentPhase === 1 && (
               <div className="space-y-6 animate-fade-in">
                 
+                {/* 0. Top CAD Blueprint Smart Import & Auto-Fill Module */}
+                <CadSmartImportDropzone
+                  language={language}
+                  onCadParsed={handleCadAutoExtract}
+                  onFieldFocus={handleFieldFocus}
+                  currentFormData={formData}
+                  isParsed={!!sharedDwgData}
+                  parsedData={sharedDwgData}
+                  fileName={sharedDwgFileName}
+                />
+
                 {/* 1. General Project Details Panel */}
 
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -3735,55 +4602,49 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   {expandedPanels.p1_general && (
                     <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.clientName}</label>
+                        {renderFieldHeader(t.clientName, language === 'ar' ? 'clientNameAr' : 'clientNameEn', true)}
                         <input 
                           type="text" 
                           name={language === 'ar' ? 'clientNameAr' : 'clientNameEn'} 
                           value={language === 'ar' ? formData.clientNameAr : formData.clientNameEn} 
                           onChange={handleInputChange} 
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                          className={getFieldInputClass(language === 'ar' ? 'clientNameAr' : 'clientNameEn', true)} 
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.projectName}</label>
+                        {renderFieldHeader(t.projectName, language === 'ar' ? 'projectNameAr' : 'projectNameEn', true)}
                         <input 
                           type="text" 
                           name={language === 'ar' ? 'projectNameAr' : 'projectNameEn'} 
                           value={language === 'ar' ? formData.projectNameAr : formData.projectNameEn} 
                           onChange={handleInputChange} 
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                          className={getFieldInputClass(language === 'ar' ? 'projectNameAr' : 'projectNameEn', true)} 
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'المقاول' : 'Contractor'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'المقاول المنفذ' : 'Executing Contractor', language === 'ar' ? 'contractingCompanyAr' : 'contractingCompanyEn', true)}
                         <input
                           type="text"
                           name={language === 'ar' ? 'contractingCompanyAr' : 'contractingCompanyEn'}
                           value={language === 'ar' ? formData.contractingCompanyAr : formData.contractingCompanyEn}
                           onChange={handleInputChange}
                           placeholder={language === 'ar' ? 'اسم شركة المقاول المنفذ' : 'Executing contractor company name'}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass(language === 'ar' ? 'contractingCompanyAr' : 'contractingCompanyEn', true)}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'الاستشاري' : 'Consultant'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'الاستشاري المشرف' : 'Supervising Consultant', language === 'ar' ? 'consultantNameAr' : 'consultantNameEn', true)}
                         <input
                           type="text"
                           name={language === 'ar' ? 'consultantNameAr' : 'consultantNameEn'}
                           value={language === 'ar' ? formData.consultantNameAr : formData.consultantNameEn}
                           onChange={handleInputChange}
                           placeholder={language === 'ar' ? 'اسم الاستشاري المشرف' : 'Supervising consultant name'}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass(language === 'ar' ? 'consultantNameAr' : 'consultantNameEn', true)}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'اسم الطريق' : 'Road Name'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'اسم الطريق' : 'Road Name', language === 'ar' ? 'roadNameAr' : 'roadNameEn', true)}
                         <RoadAutocomplete 
                           language={language}
                           value={language === 'ar' ? formData.roadNameAr : formData.roadNameEn}
@@ -3805,14 +4666,12 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'تصنيف الجهة المالكة (يُحدد لكل تصريح)' : 'Owning Authority Classification (set per permit)'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'تصنيف الجهة المالكة' : 'Owning Authority Classification', 'ownerClassification', true)}
                         <select
                           name="ownerClassification"
                           value={formData.ownerClassification}
                           onChange={handleInputChange}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass('ownerClassification', true)}
                         >
                           <option value="">{language === 'ar' ? '— اختر —' : '— Select —'}</option>
                           <option value="affiliated">{language === 'ar' ? 'تابعة للوكالة' : 'Affiliated with the Agency'}</option>
@@ -3820,54 +4679,54 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </select>
                       </div>
                       <div className="col-span-2">
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.location}</label>
+                        {renderFieldHeader(t.location, language === 'ar' ? 'locationAr' : 'locationEn', true)}
                         <input 
                           type="text" 
                           name={language === 'ar' ? 'locationAr' : 'locationEn'} 
                           value={language === 'ar' ? formData.locationAr : formData.locationEn} 
                           onChange={handleInputChange} 
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                          className={getFieldInputClass(language === 'ar' ? 'locationAr' : 'locationEn', true)} 
                         />
                       </div>
                       <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-2">
                         <div>
-                          <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.permitStartDate}</label>
+                          {renderFieldHeader(t.permitStartDate, 'permitStartDate', true)}
                           <input 
                             type="date" 
                             name="permitStartDate" 
                             value={formData.permitStartDate} 
                             onChange={handleInputChange} 
-                            className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                            className={getFieldInputClass('permitStartDate', true)} 
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.permitEndDate}</label>
+                          {renderFieldHeader(t.permitEndDate, 'permitEndDate', true)}
                           <input 
                             type="date" 
                             name="permitEndDate" 
                             value={formData.permitEndDate} 
                             onChange={handleInputChange} 
-                            className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                            className={getFieldInputClass('permitEndDate', true)} 
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.workStartDate}</label>
+                          {renderFieldHeader(t.workStartDate, 'workStartDate', true)}
                           <input 
                             type="date" 
                             name="workStartDate" 
                             value={formData.workStartDate} 
                             onChange={handleInputChange} 
-                            className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                            className={getFieldInputClass('workStartDate', true)} 
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-brand-text-gray uppercase">{t.workEndDate}</label>
+                          {renderFieldHeader(t.workEndDate, 'workEndDate', true)}
                           <input 
                             type="date" 
                             name="workEndDate" 
                             value={formData.workEndDate} 
                             onChange={handleInputChange} 
-                            className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" 
+                            className={getFieldInputClass('workEndDate', true)} 
                           />
                         </div>
                       </div>
@@ -3937,41 +4796,35 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   {expandedPanels.p1_roadwork && (
                     <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5 animate-fade-in">
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'الغرض من الحفر / نوع الأعمال' : 'Purpose of Excavation / Work Type'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'الغرض من الحفر / نوع الأعمال' : 'Purpose of Excavation / Work Type', language === 'ar' ? 'workPurposeAr' : 'workPurposeEn', true)}
                         <input
                           type="text"
                           name={language === 'ar' ? 'workPurposeAr' : 'workPurposeEn'}
                           value={language === 'ar' ? formData.workPurposeAr : formData.workPurposeEn}
                           onChange={handleInputChange}
                           placeholder={language === 'ar' ? 'مثال: إصلاح خط مياه رئيسي' : 'e.g., Main water line repair'}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass(language === 'ar' ? 'workPurposeAr' : 'workPurposeEn', true)}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'الجهة المالكة للخدمة' : 'Owning Utility / Service Provider'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'الجهة المالكة للخدمة' : 'Owning Utility / Service Provider', language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', false)}
                         <input
                           type="text"
                           name={language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn'}
                           value={language === 'ar' ? formData.owningUtilityAr : formData.owningUtilityEn}
                           onChange={handleInputChange}
                           placeholder={language === 'ar' ? 'مثال: شركة المياه الوطنية' : 'e.g., National Water Company'}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass(language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', false)}
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'درجة الطريق' : 'Road Classification'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'درجة الطريق' : 'Road Classification', 'roadClassification', true)}
                         <select
                           name="roadClassification"
                           value={formData.roadClassification}
                           onChange={handleInputChange}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass('roadClassification', true)}
                         >
                           {ROAD_CLASSIFICATIONS.map(rc => (
                             <option key={rc.id} value={rc.id}>{language === 'ar' ? rc.labelAr : rc.labelEn}</option>
@@ -3979,14 +4832,12 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'حجم المرور' : 'Traffic Volume'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'حجم المرور' : 'Traffic Volume', 'trafficVolumeLevel', true)}
                         <select
                           name="trafficVolumeLevel"
                           value={formData.trafficVolumeLevel}
                           onChange={handleInputChange}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
+                          className={getFieldInputClass('trafficVolumeLevel', true)}
                         >
                           {TRAFFIC_VOLUME_LEVELS.map(v => (
                             <option key={v.id} value={v.id}>{language === 'ar' ? v.labelAr : v.labelEn}</option>
@@ -3995,22 +4846,16 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'عدد الحارات الكلي' : 'Total Lane Count'}
-                        </label>
-                        <input type="number" min="1" name="totalLanesCount" value={formData.totalLanesCount} onChange={handleInputChange} className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" />
+                        {renderFieldHeader(language === 'ar' ? 'عدد الحارات الكلي' : 'Total Lane Count', 'totalLanesCount', true)}
+                        <input type="number" min="1" name="totalLanesCount" value={formData.totalLanesCount} onChange={handleInputChange} className={getFieldInputClass('totalLanesCount', true)} />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'عدد الحارات المغلقة' : 'Closed Lane Count'}
-                        </label>
-                        <input type="number" min="0" name="closedLanesCount" value={formData.closedLanesCount} onChange={handleInputChange} className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" />
+                        {renderFieldHeader(language === 'ar' ? 'عدد الحارات المغلقة' : 'Closed Lane Count', 'closedLanesCount', true)}
+                        <input type="number" min="0" name="closedLanesCount" value={formData.closedLanesCount} onChange={handleInputChange} className={getFieldInputClass('closedLanesCount', true)} />
                       </div>
 
                       <div className="col-span-1 md:col-span-2">
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'تصنيف مدة الأعمال' : 'Work Duration Category'}
-                        </label>
+                        {renderFieldHeader(language === 'ar' ? 'تصنيف مدة الأعمال' : 'Work Duration Category', 'workDurationCategory', true)}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
                           {DURATION_CATEGORIES.map(d => (
                             <button
@@ -4055,10 +4900,8 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       })()}
 
                       <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'طول التحويلة الكلي (م)' : 'Total Diversion Length (m)'}
-                        </label>
-                        <input type="number" min="0" name="diversionLengthM" value={formData.diversionLengthM} onChange={handleInputChange} className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition" />
+                        {renderFieldHeader(language === 'ar' ? 'طول التحويلة الكلي (شريط القياس)' : 'Total Diversion Length (Tape Measure)', 'diversionLengthM', true)}
+                        <input type="number" min="0" name="diversionLengthM" value={formData.diversionLengthM} onChange={handleInputChange} className={getFieldInputClass('diversionLengthM', true)} />
                       </div>
                       <div className="flex items-end">
                         {isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && (
@@ -4120,177 +4963,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-                {/* 2. Arterial Road Crash Protection & Smart Detour Lighting Management */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => togglePanel('p1_equipment')}
-                    className="w-full flex items-center justify-between p-5 border-b border-slate-200 font-bold text-sm transition-all bg-slate-50 text-brand-dark hover:bg-slate-100/50"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Shield className="h-4.5 w-4.5 text-brand-primary" />
-                      {language === 'ar' ? '١.٣ تجهيزات سلامة الطرق الشريانية وإدارة إضاءة التحويلة' : '1.3 Arterial Road Safety & Smart Detour Lighting'}
-                    </span>
-                    {expandedPanels.p1_equipment ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-
-                  {expandedPanels.p1_equipment && (
-                    <div className="p-5 space-y-6 animate-fade-in">
-                      {/* Point 1: Arterial Road & Crash Attenuators */}
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                        <div className="flex items-start gap-3">
-                          <input 
-                            type="checkbox"
-                            id="isArterialRoad"
-                            name="isArterialRoad"
-                            checked={formData.isArterialRoad}
-                            onChange={(e) => setFormData(prev => ({ ...prev, isArterialRoad: e.target.checked, impactAttenuators: e.target.checked }))}
-                            className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
-                          />
-                          <div>
-                            <label htmlFor="isArterialRoad" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
-                              {language === 'ar' ? 'طريق شرياني رئيسي؟ (Arterial Road Classification)' : 'Arterial Road Classification'}
-                            </label>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {language === 'ar' 
-                                ? 'الطرق الشريانية الرئيسية التي تتميز بسرعات عالية أو كثافة مرورية يجب تزويدها بمصدات صدمات معتمدة (Crash Attenuators / Impact Absorbers) لتأمين تدرج التحويلة.' 
-                                : 'Arterial roads with high design speeds or heavy traffic volumes must be equipped with certified crash attenuators (impact absorbers) at transition tapers.'}
-                            </p>
-                          </div>
-                        </div>
-
-                        {formData.isArterialRoad && (
-                          <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'نوع ومواصفة مصد الصدمات (Impact Absorber Model)' : 'Crash Attenuator Model / Type'}</label>
-                                <select
-                                  name="attenuatorType"
-                                  value={formData.attenuatorType}
-                                  onChange={handleInputChange}
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                >
-                                  <option value="mash_tl3">{language === 'ar' ? 'مصدات صدمات هيكلية MASH TL-3 QuadGuard' : 'MASH TL-3 QuadGuard Structural Attenuator'}</option>
-                                  <option value="water_filled">{language === 'ar' ? 'حواجز مائية ماصة للصدمات (Water-Filled Absorber)' : 'Water-Filled Energy Absorbing Barrier'}</option>
-                                  <option value="tma_truck">{language === 'ar' ? 'مصدات صدمات شاحنات متحركة TMA (Truck Mounted Attenuator)' : 'Truck Mounted Attenuator (TMA)'}</option>
-                                  <option value="steel_cushion">{language === 'ar' ? 'وسائد صدمات فولاذية عالية الامتصاص' : 'Steel CushionGuard Crash Attenuator'}</option>
-                                  <option value="other">{language === 'ar' ? 'أخرى (أدخل يدوياً)...' : 'Other (Enter manually)...'}</option>
-                                </select>
-
-                                {formData.attenuatorType === 'other' && (
-                                  <input
-                                    type="text"
-                                    name="attenuatorTypeCustomEn"
-                                    value={formData.attenuatorTypeCustomEn}
-                                    onChange={handleInputChange}
-                                    placeholder={language === 'ar' ? 'أدخل مواصفة مصد الصدمات هنا...' : 'Enter custom attenuator specs...'}
-                                    className="w-full mt-2 border border-slate-300 rounded p-2 text-xs"
-                                  />
-                                )}
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'عدد ومواقع التثبيت (Quantity & Placement)' : 'Quantity & Installation Placement'}</label>
-                                <input
-                                  type="text"
-                                  name="attenuatorQuantityPlacement"
-                                  value={formData.attenuatorQuantityPlacement}
-                                  onChange={handleInputChange}
-                                  placeholder={language === 'ar' ? 'مثال: وحدتان عند بداية منطقة التدرج وبداية منطقة الأمان' : 'e.g., 2 units at transition taper start'}
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Point 2: Detour Lighting Sensors & Dedicated Platform Integration */}
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                        <div className="flex items-start gap-3">
-                          <input 
-                            type="checkbox"
-                            id="hasDetourLightingSensors"
-                            name="hasDetourLightingSensors"
-                            checked={formData.hasDetourLightingSensors}
-                            onChange={(e) => setFormData(prev => ({ ...prev, hasDetourLightingSensors: e.target.checked, smartLightingSensors: e.target.checked }))}
-                            className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
-                          />
-                          <div>
-                            <label htmlFor="hasDetourLightingSensors" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
-                              {language === 'ar' ? 'مستشعرات إضاءة التحويلة المنفصلة وإدارة الانقطاع الآلي' : 'Detour Lighting Sensors & Automated Outage Telemetry'}
-                            </label>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {language === 'ar' 
-                                ? 'يجب تزويد إضاءة التحويلة بمستشعرات لاسلكية لإشعارات الأعطال الفورية والانقطاعات مع الربط المباشر بالمنصة المركزية لإدارة إضاءة التحويلات.' 
-                                : 'Detour lighting must feature wireless outage sensors and real-time integration with the dedicated detour lighting management platform.'}
-                            </p>
-                          </div>
-                        </div>
-
-                        {formData.hasDetourLightingSensors && (
-                          <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'مستوى الإضاءة الأدنى المطلوب (Target Illumination Lux)' : 'Target Illumination (Lux Level)'}</label>
-                                <select
-                                  name="lightingLuxTarget"
-                                  value={formData.lightingLuxTarget}
-                                  onChange={handleInputChange}
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                >
-                                  <option value="150">150 Lux - {language === 'ar' ? 'المعيار القياسي لأعمال التحويلات الليلية' : 'Standard Night Work Zone'}</option>
-                                  <option value="200">200 Lux - {language === 'ar' ? 'المناطق عالية الخطورة والطرق السريعة' : 'High Risk Highway Corridor'}</option>
-                                  <option value="100">100 Lux - {language === 'ar' ? 'ممرات المشاة والتحويلات الفرعية' : 'Pedestrian & Minor Detours'}</option>
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'المسافة بين أبراج الإضاءة (Tower Light Spacing)' : 'Tower Light Spacing (m)'}</label>
-                                <input
-                                  type="text"
-                                  name="lightingTowerSpacing"
-                                  value={formData.lightingTowerSpacing}
-                                  onChange={handleInputChange}
-                                  placeholder="e.g., 25m or 30m"
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'قناة التنبيه والربط اللاسلكي (Outage Telemetry Channel)' : 'Outage Telemetry Platform Channel'}</label>
-                                <select
-                                  name="lightingAlertChannel"
-                                  value={formData.lightingAlertChannel}
-                                  onChange={handleInputChange}
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                >
-                                  <option value="central_platform">{language === 'ar' ? 'المنصة الرقمية لإدارة إضاءة التحويلات (Lighting API)' : 'Dedicated Detour Lighting Platform'}</option>
-                                  <option value="sms_gateway">{language === 'ar' ? 'بوابة التنبيه الفوري SMS / IoT Cellular Gateway' : 'Cellular IoT SMS Outage Gateway'}</option>
-                                  <option value="scada">{language === 'ar' ? 'ربط غرفة التحكم والإنذار المركزي (SCADA Platform)' : 'Central SCADA Control Room Platform'}</option>
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'مولد الإضاءة الاحتياطي للطوارئ (Emergency Backup Power)' : 'Emergency Backup Generator'}</label>
-                                <input
-                                  type="text"
-                                  name="lightingBackupPower"
-                                  value={formData.lightingBackupPower}
-                                  onChange={handleInputChange}
-                                  placeholder="e.g., 15 kVA Silent Automatic Generator"
-                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. Gantt Setup Timeline */}
+                {/* 2. Phasing & Gantt Scheduler */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -4299,13 +4972,71 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   >
                     <span className="flex items-center gap-2">
                       <Clock className="h-4.5 w-4.5 text-brand-primary" />
-                      {language === 'ar' ? '١.٤ جدولة مراحل التنفيذ (Gantt Tracker)' : '1.4 Phasing & Gantt Scheduler'}
+                      {language === 'ar' ? '١.٣ جدولة مراحل التنفيذ (Gantt Tracker)' : '1.3 Phasing & Gantt Scheduler'}
                     </span>
                     {expandedPanels.p1_gantt ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
 
                   {expandedPanels.p1_gantt && (
                     <div className="p-5 space-y-4 animate-fade-in">
+
+                      {/* AI-Assisted Phasing Assistant (Gemini 2.5 Flash) */}
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                            <Sparkles className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs text-slate-800 flex items-center gap-2">
+                              <span>{language === 'ar' ? 'مساعد جدولة المراحل الذكي (كود الطرق السعودي ٣٠٥)' : 'AI Phasing & Milestone Generator (Saudi Road Code 305)'}</span>
+                              <span className="text-[9.5px] bg-blue-600 text-white font-mono font-bold px-2 py-0.5 rounded-full">
+                                Gemini 2.5 Flash
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {language === 'ar'
+                                ? 'توليد وتوزيع مراحل التجهيز، الصبات، الحفر، الاختبار والردم، وإعادة السفلتة تلقائياً وفق مدة ومعايير المشروع.'
+                                : 'Auto-distribute sequential milestones (Mobilization, Barriers, Excavation, Testing & Reinstatement) compliant with Saudi Road Code 305.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isGeneratingPhases}
+                            onClick={handleGeneratePhasingWithAi}
+                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                          >
+                            {isGeneratingPhases ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                <span>{language === 'ar' ? 'جاري التوليد الذكي...' : 'Generating Phases...'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 text-brand-gold" />
+                                <span>{language === 'ar' ? 'توليد المراحل آلياً (Auto-Generate)' : 'Auto-Generate Phasing'}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {phasingAiSuccess && (
+                        <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 text-xs text-emerald-800 flex items-center gap-2 animate-fade-in font-medium">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>{language === 'ar' ? 'تم توليد مراحل التنفيذ بنجاح بواسطة Gemini 2.5 Flash وإدراجها في الجدول الزمني.' : 'Phasing milestones successfully generated via Gemini 2.5 Flash and populated into the schedule.'}</span>
+                        </div>
+                      )}
+
+                      {phasingAiError && (
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-650 flex items-center gap-2 animate-fade-in font-medium">
+                          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                          <span>{phasingAiError}</span>
+                        </div>
+                      )}
+
                       {/* Milestones list with edit option */}
                       <div className="space-y-2.5">
                         {milestones.map((m, idx) => {
@@ -4476,91 +5207,44 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-                {/* 4. Site Overview Map */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => togglePanel('p1_map')}
-                    className="w-full flex items-center justify-between p-5 border-b border-slate-200 font-bold text-sm bg-slate-50 text-brand-dark"
-                  >
-                    <span className="flex items-center gap-2">
-                      <MapPin className="h-4.5 w-4.5 text-brand-primary" />
-                      {language === 'ar' ? '١.٥ خريطة الموقع والنقاط (مرحلة التأسيس)' : '1.5 Site Overview & Nodes Mapping'}
-                    </span>
-                    {expandedPanels.p1_map ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-
-                  {/* Map content wrapper: always keep container in DOM to avoid Leaflet destroy/reinit glitch.
-                      Use CSS to show/hide inner controls, but keep the map div always mounted. */}
-                  <div className="p-5 space-y-4">
-                    <div className={expandedPanels.p1_map ? 'block' : 'hidden'}>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-brand-light p-3 rounded-lg border border-slate-200 mb-4 gap-2">
-                        <div className="flex items-center gap-2">
-                          <Download className="w-4 h-4 text-brand-primary" />
-                          <span className="text-xs font-bold text-slate-800">
-                            {language === 'ar' ? 'تصدير المخطط الهندسي كملف CAD (.DXF):' : 'Export Projected CAD (.DXF):'}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleExportCAD}
-                            disabled={isGeneratingCAD}
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold rounded-lg transition shadow-md disabled:opacity-50"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            <span>{isGeneratingCAD ? (language === 'ar' ? 'جاري إنشاء المخطط...' : 'Generating CAD...') : (language === 'ar' ? 'توليد وتنزيل مخطط CAD (.DXF)' : 'Generate & Export CAD (.DXF)')}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => { setBoundaryPoints([]); setDetourNodes([]); setPedestrianNodes([]); }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-650 hover:bg-red-750 text-white text-xs font-bold rounded-lg transition shadow-sm"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                            <span>{language === 'ar' ? 'مسح النقاط' : 'Reset Points'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      ref={phase1MapContainerRef}
-                      className="rounded-xl border border-slate-300 relative z-0"
-                      style={{
-                        height: '400px',
-                        overflow: expandedPanels.p1_map ? 'hidden' : 'hidden',
-                        maxHeight: expandedPanels.p1_map ? '400px' : '0px',
-                        transition: 'max-height 0.25s ease',
-                        borderWidth: expandedPanels.p1_map ? '1px' : '0px'
-                      }}
-                      id="phase1-leaflet-map"
-                    />
-
-                    <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 ${expandedPanels.p1_map ? 'block' : 'hidden'}`}>
-                       <div className="text-xs p-3 bg-blue-50 border border-blue-200 rounded text-blue-900">
-                         <b>{language === 'ar' ? 'منطقة العمل (أزرق)' : 'Construction Area (Blue)'}</b><br/>
-                         {language === 'ar' ? 'اضغط ٤ مرات لتحديد زوايا منطقة العمل.' : 'Click 4 times to set construction boundary nodes (C1-C4).'}
-                       </div>
-                       <div className="text-xs p-3 bg-orange-50 border border-orange-200 rounded text-orange-900">
-                         <b>{language === 'ar' ? 'مسار التحويلة (برتقالي)' : 'Detour Route (Orange)'}</b><br/>
-                         {language === 'ar' ? 'بعد منطقة العمل، اضغط مرتين لتحديد بداية ونهاية التحويلة.' : 'After construction nodes, click 2 times to set detour start/end (D1-D2).'}
-                       </div>
-                       <div className="text-xs p-3 bg-green-50 border border-green-200 rounded text-green-900">
-                         <b>{language === 'ar' ? 'ممر المشاة (أخضر)' : 'Pedestrian Route (Green)'}</b><br/>
-                         {language === 'ar' ? 'أخيراً، اضغط مرتين لتحديد ممر المشاة.' : 'Finally, click 2 times to set pedestrian start/end (P1-P2).'}
-                       </div>
-                    </div>
-                  </div>
-                </div>
-
               </div>
             )}
 
             {/* PHASE 2 */}
             {currentPhase === 2 && (
               <div className="space-y-6 animate-fade-in">
+                
+                {/* Unified CAD-Derived Auto-Population Banner */}
+                {sharedDwgData && (
+                  <div className="bg-gradient-to-r from-slate-900 to-slate-950 p-4 rounded-xl text-white border border-slate-800 shadow-md flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-brand-primary/20 border border-brand-primary/40 flex items-center justify-center text-brand-gold">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs flex items-center gap-2">
+                          <span>{language === 'ar' ? 'بيانات هندسية مستوردة من المخطط (CAD Ingestion Active)' : 'CAD-Driven Parameters Active'}</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-400/30">
+                            ✓ {sharedDwgFileName}
+                          </span>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5">
+                          {language === 'ar'
+                            ? `عرض الشارع: ${formData.siteWidth || 67}م • الحارات النشطة: ${formData.activeLanesCount || 2} • الصبات الخرسانية: ${formData.trenchLength || 702}م`
+                            : `Corridor Width: ${formData.siteWidth || 67}m • Active Lanes: ${formData.activeLanesCount || 2} • Concrete Barriers: ${formData.trenchLength || 702}m`}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGeoreferencedReport(true)}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'معاينة تقرير المطابقة الجغرافية' : 'View 6-DOF Report'}</span>
+                    </button>
+                  </div>
+                )}
                 
                 {/* 1. CAD File upload + DWG Map Overlay */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -4581,9 +5265,10 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       <DwgMapOverlay
                         language={language}
                         onPlacementsChange={handleDwgPlacementsChange}
-                        anchorLat={boundaryPoints[0]?.lat || 24.4686}
-                        anchorLng={boundaryPoints[0]?.lng || 39.6120}
+                        anchorLat={sharedDwgData?.centerLatLng?.[0] || 24.4686}
+                        anchorLng={sharedDwgData?.centerLatLng?.[1] || 39.6120}
                         roadName={formData.roadNameAr || formData.roadNameEn}
+                        preloadedDwgData={sharedDwgData}
                       />
                     </div>
                   )}
@@ -4605,25 +5290,205 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
 
                   {expandedPanels.p2_crosssection && (
                     <div className="p-5 animate-fade-in space-y-4">
-                      {/* Configuration controls */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
-                        <div>
-                          <label className="block text-slate-500 font-bold uppercase mb-1.5">{language === 'ar' ? 'عدد الحارات النشطة' : 'Number of Active Lanes'}</label>
-                          <select 
-                            name="activeLanesCount" 
-                            value={formData.activeLanesCount || 2} 
-                            onChange={handleInputChange} 
-                            className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary"
-                          >
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                          </select>
+                      {/* CAD Blueprint Sync Banner */}
+                      {sharedDwgData && (
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-800 block">
+                                {language === 'ar' ? 'المقطع العرضي مرتبط ببيانات مخطط الأوتوكاد (CAD Live Sync)' : 'Cross-Section Synced with CAD Blueprint'}
+                              </span>
+                              <span className="text-[11px] text-slate-600 font-mono block mt-0.5">
+                                {language === 'ar'
+                                  ? `عرض الشارع: ${formData.siteWidth || 35}م • عرض الحفر: ${formData.trenchWidth || 4.2}م • الحارات المقترحة: ${formData.activeLanesCount || 2} (${formData.detourLanesPlacement === 'dual' ? 'يمين ويسار' : formData.detourLanesPlacement === 'left' ? 'يسار' : 'يمين'})`
+                                  : `Corridor Width: ${formData.siteWidth || 35}m • Trench: ${formData.trenchWidth || 4.2}m • Active Lanes: ${formData.activeLanesCount || 2} (${formData.detourLanesPlacement || 'dual'})`}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="text-[10px] bg-blue-600 text-white font-semibold px-2 py-0.5 rounded-full font-mono">
+                            {sharedDwgFileName || 'DWG Synced'}
+                          </span>
                         </div>
+                      )}
+
+                      {/* Detour Lanes Placement Toggle */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                        <label className="block text-xs font-bold text-slate-700 uppercase">
+                          {language === 'ar' ? 'توزيع وموقع حارات التحويلة المرورية (Detour Lanes Placement):' : 'Detour Active Lanes Placement & Distribution:'}
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => {
+                                const left = prev.activeLanesLeftCount || 1;
+                                const right = prev.activeLanesRightCount || 1;
+                                return {
+                                  ...prev,
+                                  detourLanesPlacement: 'dual',
+                                  activeLanesLeftCount: left,
+                                  activeLanesRightCount: right,
+                                  activeLanesCount: left + right
+                                };
+                              });
+                            }}
+                            className={`p-3 rounded-xl border font-bold text-center transition flex flex-col items-center gap-1 ${
+                              formData.detourLanesPlacement === 'dual'
+                                ? 'border-brand-primary bg-brand-light/30 text-brand-primary ring-2 ring-brand-primary/20 shadow-xs'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-sm">↔️</span>
+                            <span>{language === 'ar' ? 'حارات يمين ويسار (مزدوجة)' : 'Dual-Sided (Left & Right)'}</span>
+                            <span className="text-[10px] font-normal text-slate-500">{language === 'ar' ? 'فصل الحركة على جانبي منطقة العمل' : 'Split traffic around central work zone'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                detourLanesPlacement: 'right',
+                                activeLanesLeftCount: 0,
+                                activeLanesRightCount: prev.activeLanesRightCount || prev.activeLanesCount || 2,
+                                activeLanesCount: prev.activeLanesRightCount || prev.activeLanesCount || 2
+                              }));
+                            }}
+                            className={`p-3 rounded-xl border font-bold text-center transition flex flex-col items-center gap-1 ${
+                              formData.detourLanesPlacement === 'right'
+                                ? 'border-brand-primary bg-brand-light/30 text-brand-primary ring-2 ring-brand-primary/20 shadow-xs'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-sm">➡️</span>
+                            <span>{language === 'ar' ? 'حارات التحويلة على اليمين' : 'Right Side Detour Lanes'}</span>
+                            <span className="text-[10px] font-normal text-slate-500">{language === 'ar' ? 'تحويل كافة المسارات ليمين منطقة العمل' : 'All active detour lanes to the right'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                detourLanesPlacement: 'left',
+                                activeLanesLeftCount: prev.activeLanesLeftCount || prev.activeLanesCount || 2,
+                                activeLanesRightCount: 0,
+                                activeLanesCount: prev.activeLanesLeftCount || prev.activeLanesCount || 2
+                              }));
+                            }}
+                            className={`p-3 rounded-xl border font-bold text-center transition flex flex-col items-center gap-1 ${
+                              formData.detourLanesPlacement === 'left'
+                                ? 'border-brand-primary bg-brand-light/30 text-brand-primary ring-2 ring-brand-primary/20 shadow-xs'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-sm">⬅️</span>
+                            <span>{language === 'ar' ? 'حارات التحويلة على اليسار' : 'Left Side Detour Lanes'}</span>
+                            <span className="text-[10px] font-normal text-slate-500">{language === 'ar' ? 'تحويل كافة المسارات ليسار منطقة العمل' : 'All active detour lanes to the left'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pedestrian Path Inclusion Toggle */}
+                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xl">🚶</span>
+                          <div>
+                            <span className="font-bold text-slate-800 block">
+                              {language === 'ar' ? 'توفير مسار مشاة في المقطع العرضي (Pedestrian Path Required):' : 'Dedicated Pedestrian Path in Cross-Section:'}
+                            </span>
+                            <span className="text-[11px] text-slate-500 block">
+                              {language === 'ar'
+                                ? 'حدد ما إذا كانت التحويلة تتطلب ممر مشاة محمي (غير إلزامي للطرق السريعة أو المناطق الخالية من المشاة)'
+                                : 'Specify if detour requires a pedestrian path (optional for expressways/non-pedestrian corridors)'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, includePedestrianPath: true, pedestrianPathProvided: true }))}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                              formData.includePedestrianPath !== false
+                                ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span>✓</span>
+                            <span>{language === 'ar' ? 'مطلوب ومشمول' : 'Required & Included'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, includePedestrianPath: false, pedestrianPathProvided: false }))}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 border ${
+                              formData.includePedestrianPath === false
+                                ? 'bg-amber-600 text-white border-amber-500 shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span>✕</span>
+                            <span>{language === 'ar' ? 'غير مطلوب (طريق سريع / لا مشاة)' : 'Not Required (No Pedestrians)'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Configuration controls */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+                        {/* Left Lanes Count (if dual or left) */}
+                        {(formData.detourLanesPlacement === 'dual' || formData.detourLanesPlacement === 'left') && (
+                          <div>
+                            <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'حارات المسار الأيسر' : 'Left Active Lanes'}</label>
+                            <select 
+                              name="activeLanesLeftCount" 
+                              value={formData.activeLanesLeftCount || 1} 
+                              onChange={(e) => {
+                                const left = parseInt(e.target.value) || 1;
+                                setFormData(prev => ({
+                                  ...prev,
+                                  activeLanesLeftCount: left,
+                                  activeLanesCount: prev.detourLanesPlacement === 'dual' ? left + (prev.activeLanesRightCount || 1) : left
+                                }));
+                              }}
+                              className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono font-bold"
+                            >
+                              <option value="1">1 {language === 'ar' ? 'حارة يسرى' : 'Left Lane'}</option>
+                              <option value="2">2 {language === 'ar' ? 'حارتين يسار' : 'Left Lanes'}</option>
+                              <option value="3">3 {language === 'ar' ? 'حارات يسار' : 'Left Lanes'}</option>
+                              <option value="4">4 {language === 'ar' ? 'حارات يسار' : 'Left Lanes'}</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Right Lanes Count (if dual or right) */}
+                        {(formData.detourLanesPlacement === 'dual' || formData.detourLanesPlacement === 'right') && (
+                          <div>
+                            <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'حارات المسار الأيمن' : 'Right Active Lanes'}</label>
+                            <select 
+                              name="activeLanesRightCount" 
+                              value={formData.activeLanesRightCount || 1} 
+                              onChange={(e) => {
+                                const right = parseInt(e.target.value) || 1;
+                                setFormData(prev => ({
+                                  ...prev,
+                                  activeLanesRightCount: right,
+                                  activeLanesCount: prev.detourLanesPlacement === 'dual' ? (prev.activeLanesLeftCount || 1) + right : right
+                                }));
+                              }}
+                              className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono font-bold"
+                            >
+                              <option value="1">1 {language === 'ar' ? 'حارة يمنى' : 'Right Lane'}</option>
+                              <option value="2">2 {language === 'ar' ? 'حارتين يمين' : 'Right Lanes'}</option>
+                              <option value="3">3 {language === 'ar' ? 'حارات يمين' : 'Right Lanes'}</option>
+                              <option value="4">4 {language === 'ar' ? 'حارات يمين' : 'Right Lanes'}</option>
+                            </select>
+                          </div>
+                        )}
                         
                         <div>
-                          <label className="block text-slate-500 font-bold uppercase mb-1.5">{language === 'ar' ? 'عرض الحارة المرورية (متر)' : 'Active Lane Width (m)'}</label>
+                          <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'عرض الحارة المرورية (متر)' : 'Active Lane Width (m)'}</label>
                           <input 
                             type="number" 
                             step="0.1" 
@@ -4634,20 +5499,67 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           />
                         </div>
 
+                        {formData.includePedestrianPath !== false ? (
+                          <div>
+                            <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'عرض ممر المشاة (متر)' : 'Pedestrian Path Width (m)'}</label>
+                            <input 
+                              type="number" 
+                              step="0.1" 
+                              name="pedestrianPathWidth" 
+                              value={formData.pedestrianPathWidth || 1.5} 
+                              onChange={handleInputChange} 
+                              className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex flex-col justify-center">
+                            <label className="block text-slate-400 font-bold uppercase mb-1">{language === 'ar' ? 'ممر المشاة' : 'Pedestrian Path'}</label>
+                            <div className="bg-slate-100 border border-slate-200 rounded p-2 text-slate-500 font-bold text-[11px] text-center">
+                              {language === 'ar' ? '🚫 غير مطلوب بالمقطع' : '🚫 Omitted (Not Required)'}
+                            </div>
+                          </div>
+                        )}
+
                         <div>
-                          <label className="block text-slate-500 font-bold uppercase mb-1.5">{language === 'ar' ? 'عرض ممر المشاة (متر)' : 'Pedestrian Path Width (m)'}</label>
+                          <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'عرض خندق الحفر (متر)' : 'Trench Width (m)'}</label>
                           <input 
                             type="number" 
                             step="0.1" 
-                            name="pedestrianPathWidth" 
-                            value={formData.pedestrianPathWidth || 1.5} 
+                            name="trenchWidth" 
+                            value={formData.trenchWidth || 4.2} 
+                            onChange={handleInputChange} 
+                            className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'عرض الشارع الإجمالي (متر)' : 'Corridor Total Width (m)'}</label>
+                          <input 
+                            type="number" 
+                            step="0.5" 
+                            name="siteWidth" 
+                            value={formData.siteWidth || 35} 
                             onChange={handleInputChange} 
                             className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
                           />
                         </div>
                       </div>
 
-                      <div className="bg-slate-900 rounded-xl overflow-hidden shadow-lg p-2">
+                      <div className="bg-slate-950 rounded-2xl overflow-hidden shadow-xl border border-slate-800 p-3 sm:p-5">
+                        <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800 text-xs flex-wrap gap-2">
+                          <div className="flex items-center gap-2 text-white font-bold">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>{language === 'ar' ? 'المخطط الهندسي للمقطع العرضي (2D Cross-Section Preview)' : '2D Engineering Cross-Section Preview'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                            <span className="bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-700 text-amber-300">
+                              {language === 'ar' ? `الحارات: ${formData.activeLanesCount || 2}` : `Lanes: ${formData.activeLanesCount || 2}`}
+                            </span>
+                            <span className="bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-700 text-emerald-300">
+                              {language === 'ar' ? `الخندق: ${formData.trenchWidth || 4.2}م` : `Trench: ${formData.trenchWidth || 4.2}m`}
+                            </span>
+                          </div>
+                        </div>
                         {renderCrossSectionSVG(false)}
                       </div>
                     </div>
@@ -4661,6 +5573,38 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             {currentPhase === 3 && (
               <div className="space-y-6 animate-fade-in">
                 
+                {/* Unified CAD-Derived Auto-Population Banner */}
+                {sharedDwgData && (
+                  <div className="bg-gradient-to-r from-slate-900 to-slate-950 p-4 rounded-xl text-white border border-slate-800 shadow-md flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-brand-primary/20 border border-brand-primary/40 flex items-center justify-center text-brand-gold">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs flex items-center gap-2">
+                          <span>{language === 'ar' ? 'حسابات ومسافات الأمان مستوردة من المخطط (CAD Ingestion Active)' : 'CAD-Driven Zone Dimensions Active'}</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-400/30">
+                            ✓ {sharedDwgFileName}
+                          </span>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5">
+                          {language === 'ar'
+                            ? `طول التحويلة: ${formData.diversionLengthM || 1032}م • التدرج L: ${formData.proposedTaper || 250}م • الأمان: ${formData.proposedBuffer || 50}م • السرعة: ${formData.speedLimit || 50} كم/س`
+                            : `Detour Length: ${formData.diversionLengthM || 1032}m • Taper: ${formData.proposedTaper || 250}m • Buffer: ${formData.proposedBuffer || 50}m • Speed: ${formData.speedLimit || 50}km/h`}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGeoreferencedReport(true)}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'تصدير تقرير الاعتماد 6-DOF' : 'Export 6-DOF Report'}</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* 1. Detour calculator */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
@@ -4806,6 +5750,27 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
 
                   {expandedPanels.p3_auditor && (
                     <div className="p-5 space-y-4 animate-fade-in">
+                      {/* Missing CAD Data Notification & Fallback Alert */}
+                      {sharedDwgData && (
+                        (!formData.roadClosureAr || !formData.excavationDepth || !formData.trenchWidth || !formData.barrierLateralClearance || !formData.siteLength || Number(formData.siteLength) <= 0) && (
+                          <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 text-xs text-amber-900 flex items-start gap-2.5 shadow-xs animate-fade-in">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold block">
+                                {language === 'ar'
+                                  ? 'بيانات المخطط غير مكتملة: يرجى مراجعة واستكمال بارامترات الإغلاق في البند ٣.٢ يدوياً.'
+                                  : 'CAD metadata incomplete: Please manually review and complete Section 3.2 Closure parameters.'}
+                              </span>
+                              <span className="text-[10.5px] text-amber-700 block mt-0.5">
+                                {language === 'ar'
+                                  ? 'تم فتح كافة حقول البند ٣.٢ للتعديل اليدوي المباشر دون إيقاف سير العمل.'
+                                  : 'All Section 3.2 fields are unlocked for manual input and adjustment without halting the workflow.'}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      )}
+
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase">{t.roadClosureLabel}</label>
                         <textarea name={language === 'ar' ? 'roadClosureAr' : 'roadClosureEn'} rows="2" value={language === 'ar' ? formData.roadClosureAr : formData.roadClosureEn} onChange={handleInputChange} className="w-full mt-2 border border-slate-300 rounded p-2 text-xs" />
@@ -4964,7 +5929,257 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-                {/* 5. Gap 4: Site Photo Stream & GPS 25m Interval Parser */}
+                {/* 3. Relocated Section 1.3: Arterial Road Crash Protection & Smart Detour Lighting (Mandatory when triggered per Saudi Road Code 305) */}
+                {(() => {
+                  const isTriggered = getIsArterialTriggered(formData);
+                  const isSectionComplete = isPanelComplete('p1_equipment');
+                  const start = formData.workStartDate ? new Date(formData.workStartDate) : null;
+                  const end = formData.workEndDate ? new Date(formData.workEndDate) : null;
+                  const calculatedHours = (start && end) ? Math.max(0, (end - start) / (1000 * 60 * 60)) : 0;
+                  const isArterialRoadClass = formData.roadClassification === 'main' || formData.roadClassification === 'arterial';
+                  const isHighSpeed = parseFloat(formData.speedLimit) >= 80;
+                  const isLongTerm = formData.workDurationCategory === 'long' || calculatedHours > 72;
+                  const isLongDetour = parseFloat(formData.diversionLengthM) > 400;
+
+                  return (
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => togglePanel('p1_equipment')}
+                        className={`w-full flex items-center justify-between p-5 border-b border-slate-200 font-bold text-sm transition-all ${
+                          isTriggered && !isSectionComplete ? 'bg-red-50/50 text-red-900' : 'bg-slate-50 text-brand-dark hover:bg-slate-100/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Shield className={`h-4.5 w-4.5 ${isTriggered ? 'text-red-600' : 'text-brand-primary'}`} />
+                          <span>
+                            {language === 'ar' ? '٣.٣ تجهيزات سلامة الطرق الشريانية وإدارة إضاءة التحويلة' : '3.3 Arterial Road Safety & Smart Detour Lighting'}
+                          </span>
+                          {isTriggered ? (
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 border ${
+                              isSectionComplete 
+                                ? 'bg-emerald-500/20 text-emerald-800 border-emerald-500/30' 
+                                : 'bg-red-500/20 text-red-700 border-red-500/30 animate-pulse'
+                            }`}>
+                              <AlertTriangle className="w-3 h-3 text-red-600" />
+                              {language === 'ar' ? 'إلزامي وفق كود الطرق ٣٠٥' : 'Mandatory per Saudi Road Code 305'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-normal">
+                              {language === 'ar' ? 'اختياري' : 'Optional'}
+                            </span>
+                          )}
+                        </div>
+                        {expandedPanels.p1_equipment ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+
+                      {expandedPanels.p1_equipment && (
+                        <div className="p-5 space-y-6 animate-fade-in">
+                          {/* Saudi Road Code 305 Guideline Evaluation Notice */}
+                          {isTriggered && (
+                            <div className={`border rounded-xl p-3.5 text-xs space-y-1.5 ${
+                              isSectionComplete ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' : 'bg-red-50/90 border-red-200 text-red-900'
+                            }`}>
+                              <div className="font-bold flex items-center gap-1.5">
+                                <AlertTriangle className={`w-4 h-4 ${isSectionComplete ? 'text-emerald-600' : 'text-red-600'}`} />
+                                <span>
+                                  {language === 'ar'
+                                    ? 'متطلب إلزامي وفق كود الطرق السعودي (Part 305):'
+                                    : 'Mandatory Requirement per Saudi Road Code (Part 305):'}
+                                </span>
+                              </div>
+                              <ul className="list-disc list-inside text-[11px] space-y-0.5 font-sans pl-2">
+                                {isArterialRoadClass && (
+                                  <li>{language === 'ar' ? 'تصنيف الطريق: رئيسي / شرياني / سريع (Arterial / Expressway).' : 'Road Classification: Main / Arterial / Expressway.'}</li>
+                                )}
+                                {isHighSpeed && (
+                                  <li>{language === 'ar' ? `سرعة الطريق التصميمية: ${formData.speedLimit} كم/س (≥ ٨٠ كم/س).` : `Design Speed: ${formData.speedLimit} km/h (≥ 80 km/h).`}</li>
+                                )}
+                                {isLongTerm && (
+                                  <li>{language === 'ar' ? `مدة الأعمال: ${Math.round(calculatedHours)} ساعة (طويلة المدى > ٧٢ ساعة).` : `Work Duration: ${Math.round(calculatedHours)} hours (Long-term > 72h).`}</li>
+                                )}
+                                {isLongDetour && (
+                                  <li>{language === 'ar' ? `طول التحويلة: ${formData.diversionLengthM}م (> ٤٠٠م).` : `Diversion Length: ${formData.diversionLengthM}m (> 400m).`}</li>
+                                )}
+                              </ul>
+                              <span className="block text-[10px] font-bold mt-1">
+                                {isSectionComplete
+                                  ? (language === 'ar' ? '✓ تم استيفاء متطلبات كود الطرق ٣٠٥ بنجاح.' : '✓ Saudi Road Code 305 requirements successfully met.')
+                                  : (language === 'ar' ? '⚠️ استكمال هذا البند إلزامي ومطلوب لتقديم طلب الاعتماد.' : '⚠️ Completing this section is mandatory to submit the detour permit.')}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Point 1: Arterial Road & Crash Attenuators */}
+                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                            <div className="flex items-start gap-3">
+                              <input 
+                                type="checkbox"
+                                id="isArterialRoad"
+                                name="isArterialRoad"
+                                checked={formData.isArterialRoad}
+                                onChange={(e) => setFormData(prev => ({ ...prev, isArterialRoad: e.target.checked, impactAttenuators: e.target.checked }))}
+                                className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
+                              />
+                              <div>
+                                <label htmlFor="isArterialRoad" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
+                                  {language === 'ar' ? 'طريق شرياني رئيسي ومصدات صدمات (Arterial Crash Attenuators)' : 'Arterial Road Crash Attenuators'}
+                                  {isTriggered && <span className="text-red-500 font-bold ml-1">*</span>}
+                                </label>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {language === 'ar' 
+                                    ? 'الطرق الشريانية الرئيسية التي تتميز بسرعات عالية أو كثافة مرورية يجب تزويدها بمصدات صدمات معتمدة (Crash Attenuators / Impact Absorbers) لتأمين تدرج التحويلة.' 
+                                    : 'Arterial roads with high design speeds or heavy traffic volumes must be equipped with certified crash attenuators (impact absorbers) at transition tapers.'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {formData.isArterialRoad && (
+                              <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">
+                                      {language === 'ar' ? 'نوع ومواصفة مصد الصدمات (Impact Absorber Model)' : 'Crash Attenuator Model / Type'}
+                                      <span className="text-red-500 font-bold ml-1">*</span>
+                                    </label>
+                                    <select
+                                      name="attenuatorType"
+                                      value={formData.attenuatorType}
+                                      onChange={handleInputChange}
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
+                                    >
+                                      <option value="mash_tl3">{language === 'ar' ? 'مصدات صدمات هيكلية MASH TL-3 QuadGuard' : 'MASH TL-3 QuadGuard Structural Attenuator'}</option>
+                                      <option value="water_filled">{language === 'ar' ? 'حواجز مائية ماصة للصدمات (Water-Filled Absorber)' : 'Water-Filled Energy Absorbing Barrier'}</option>
+                                      <option value="tma_truck">{language === 'ar' ? 'مصدات صدمات شاحنات متحركة TMA (Truck Mounted Attenuator)' : 'Truck Mounted Attenuator (TMA)'}</option>
+                                      <option value="steel_cushion">{language === 'ar' ? 'وسائد صدمات فولاذية عالية الامتصاص' : 'Steel CushionGuard Crash Attenuator'}</option>
+                                      <option value="other">{language === 'ar' ? 'أخرى (أدخل يدوياً)...' : 'Other (Enter manually)...'}</option>
+                                    </select>
+
+                                    {formData.attenuatorType === 'other' && (
+                                      <input
+                                        type="text"
+                                        name="attenuatorTypeCustomEn"
+                                        value={formData.attenuatorTypeCustomEn}
+                                        onChange={handleInputChange}
+                                        placeholder={language === 'ar' ? 'أدخل مواصفة مصد الصدمات هنا...' : 'Enter custom attenuator specs...'}
+                                        className="w-full mt-2 border border-slate-300 rounded p-2 text-xs"
+                                      />
+                                    )}
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">
+                                      {language === 'ar' ? 'عدد ومواقع التثبيت (Quantity & Placement)' : 'Quantity & Installation Placement'}
+                                    </label>
+                                    <input
+                                      type="text"
+                                      name="attenuatorQuantityPlacement"
+                                      value={formData.attenuatorQuantityPlacement}
+                                      onChange={handleInputChange}
+                                      placeholder={language === 'ar' ? 'مثال: وحدتان عند بداية منطقة التدرج وبداية منطقة الأمان' : 'e.g., 2 units at transition taper start'}
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Point 2: Detour Lighting Sensors & Dedicated Platform Integration */}
+                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                            <div className="flex items-start gap-3">
+                              <input 
+                                type="checkbox"
+                                id="hasDetourLightingSensors"
+                                name="hasDetourLightingSensors"
+                                checked={formData.hasDetourLightingSensors}
+                                onChange={(e) => setFormData(prev => ({ ...prev, hasDetourLightingSensors: e.target.checked, smartLightingSensors: e.target.checked }))}
+                                className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
+                              />
+                              <div>
+                                <label htmlFor="hasDetourLightingSensors" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
+                                  {language === 'ar' ? 'مستشعرات إضاءة التحويلة وإدارة الانقطاع الآلي' : 'Detour Lighting Sensors & Automated Outage Telemetry'}
+                                  {isTriggered && <span className="text-red-500 font-bold ml-1">*</span>}
+                                </label>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {language === 'ar' 
+                                    ? 'يجب تزويد إضاءة التحويلة بمستشعرات لاسلكية لإشعارات الأعطال الفورية والانقطاعات مع الربط المباشر بالمنصة المركزية لإدارة إضاءة التحويلات.' 
+                                    : 'Detour lighting must feature wireless outage sensors and real-time integration with the dedicated detour lighting management platform.'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {formData.hasDetourLightingSensors && (
+                              <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">
+                                      {language === 'ar' ? 'مستوى الإضاءة الأدنى المطلوب (Target Illumination Lux)' : 'Target Illumination (Lux Level)'}
+                                      <span className="text-red-500 font-bold ml-1">*</span>
+                                    </label>
+                                    <select
+                                      name="lightingLuxTarget"
+                                      value={formData.lightingLuxTarget}
+                                      onChange={handleInputChange}
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
+                                    >
+                                      <option value="150">150 Lux - {language === 'ar' ? 'المعيار القياسي لأعمال التحويلات الليلية' : 'Standard Night Work Zone'}</option>
+                                      <option value="200">200 Lux - {language === 'ar' ? 'المناطق عالية الخطورة والطرق السريعة' : 'High Risk Highway Corridor'}</option>
+                                      <option value="100">100 Lux - {language === 'ar' ? 'ممرات المشاة والتحويلات الفرعية' : 'Pedestrian & Minor Detours'}</option>
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'المسافة بين أبراج الإضاءة (Tower Light Spacing)' : 'Tower Light Spacing (m)'}</label>
+                                    <input
+                                      type="text"
+                                      name="lightingTowerSpacing"
+                                      value={formData.lightingTowerSpacing}
+                                      onChange={handleInputChange}
+                                      placeholder="e.g., 25m or 30m"
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">
+                                      {language === 'ar' ? 'قناة التنبيه والربط اللاسلكي (Outage Telemetry Channel)' : 'Outage Telemetry Platform Channel'}
+                                      <span className="text-red-500 font-bold ml-1">*</span>
+                                    </label>
+                                    <select
+                                      name="lightingAlertChannel"
+                                      value={formData.lightingAlertChannel}
+                                      onChange={handleInputChange}
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
+                                    >
+                                      <option value="central_platform">{language === 'ar' ? 'المنصة الرقمية لإدارة إضاءة التحويلات (Lighting API)' : 'Dedicated Detour Lighting Platform'}</option>
+                                      <option value="sms_gateway">{language === 'ar' ? 'بوابة التنبيه الفوري SMS / IoT Cellular Gateway' : 'Cellular IoT SMS Outage Gateway'}</option>
+                                      <option value="scada">{language === 'ar' ? 'ربط غرفة التحكم والإنذار المركزي (SCADA Platform)' : 'Central SCADA Control Room Platform'}</option>
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'مولد الإضاءة الاحتياطي للطوارئ (Emergency Backup Power)' : 'Emergency Backup Generator'}</label>
+                                    <input
+                                      type="text"
+                                      name="lightingBackupPower"
+                                      value={formData.lightingBackupPower}
+                                      onChange={handleInputChange}
+                                      placeholder="e.g., 15 kVA Silent Automatic Generator"
+                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* 4. Gap 4: Site Photo Stream & GPS 25m Interval Parser */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -4973,7 +6188,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   >
                     <span className="flex items-center gap-2">
                       <Globe className="h-4.5 w-4.5 text-teal-600" />
-                      {language === 'ar' ? '٣.٣ توثيق الصور الميدانية المكانية (تباعد ≤ ٢٥م)' : '3.3 Geotagged Photo Intake (≤ 25m Spatial Interval)'}
+                      {language === 'ar' ? '٣.٤ توثيق الصور الميدانية المكانية (تباعد ≤ ٢٥م)' : '3.4 Geotagged Photo Intake (≤ 25m Spatial Interval)'}
                     </span>
                     {expandedPanels.p3_photos ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
@@ -6242,6 +7457,63 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
           onApprove={handleApproveFromOpeningMinutes}
           onSave={handleSaveOpeningMinutes}
         />
+
+        {/* 6-DOF Georeferenced Engineering & Satellite Alignment Report Modal */}
+        <GeoreferencedReportModal
+          isOpen={showGeoreferencedReport}
+          onClose={() => setShowGeoreferencedReport(false)}
+          language={language}
+          formData={formData}
+          boundaryPoints={boundaryPoints}
+          detourNodes={detourNodes}
+          pedestrianNodes={pedestrianNodes}
+          dwgData={sharedDwgData}
+          placedElements={dwgPlacements}
+        />
+
+        {/* Global Reset Confirmation Modal */}
+        {resetConfirmModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-200" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+              <div className="flex items-center gap-3 text-rose-600">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center font-bold">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    {language === 'ar' ? 'تأكيد مسح كافة النقاط' : 'Confirm Global Canvas Reset'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {language === 'ar' ? 'سيتم مسح نقاط منطقة العمل والتحويلة والمشاة معاً' : 'This will clear construction, detour, and pedestrian nodes.'}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 bg-rose-50 p-3 rounded-xl border border-rose-200">
+                {language === 'ar'
+                  ? 'هل أنت متأكد من رغبتك في مسح كافة نقاط المخطط على الخريطة؟ لا يمكن التراجع عن هذه العملية.'
+                  : 'Are you sure you want to reset all canvas nodes? This action cannot be undone.'}
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetConfirmModal({ isOpen: false, targetLayer: null })}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                >
+                  {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetAllNodes}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold rounded-lg shadow-sm transition"
+                >
+                  {language === 'ar' ? 'نعم، مسح الكل' : 'Yes, Reset All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     );

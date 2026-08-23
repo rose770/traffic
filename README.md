@@ -116,6 +116,6 @@ The Express server (`server.js`) is configured to serve the production bundle fr
 ## 📡 Key API Endpoints
 
 * `POST /api/parse-dwg`: Uploads a `.dwg` or `.dxf` CAD file, performs spatial clustering, extracts entities/layers/blocks, calculates ground control points, and returns GeoJSON with metric measurements.
-* `GET /api/projects`: Retrieves the list of all road projects and permit records.
-* `POST /api/projects`: Creates a new project and saves road attributes, coordinates, and supervisor details.
-* `POST /api/generate-permit-doc`: Generates and downloads the official permit documentation as a `.docx` file.
+* `GET /api/permits`: Retrieves the list of all road projects and permit records.
+* `POST /api/permits`: Creates a new project and saves road attributes, coordinates, and supervisor details.
+* `POST /api/generate-cad`: Generates and exports CAD geometry structures.
