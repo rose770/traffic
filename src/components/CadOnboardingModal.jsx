@@ -166,7 +166,7 @@ export const CadOnboardingModal = ({
 
                 <div className="flex items-center gap-2 text-[11px] text-slate-600 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-xs">
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span>{language === 'ar' ? 'استخراج ذكي لـ 70+ حقل في الثواني الأولى' : 'Instant AI extraction of 70+ planning parameters'}</span>
+                  <span>{language === 'ar' ? 'استخراج ذكي لـ 70+ حقل بواسطة Tahcom AI' : 'Instant Tahcom AI extraction of 70+ planning parameters'}</span>
                 </div>
               </div>
 

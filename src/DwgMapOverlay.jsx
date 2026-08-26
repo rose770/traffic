@@ -6,7 +6,7 @@ import {
   Compass, Sparkles, Zap, Maximize2, Type, Ruler, Tag, ShieldAlert,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCw, Target, RefreshCw,
   Lock, Unlock, Globe, Satellite, Navigation, CheckSquare, Square, Plus,
-  FileCode, Copy, CornerDownRight, Check, Cpu
+  FileCode, Copy, CornerDownRight, Check, Cpu, Undo2, Redo2
 } from 'lucide-react';
 import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
@@ -393,53 +393,93 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
   }
 };
 
+// Helper: Detect if a CAD feature represents a Traffic Sign (STOP sign, speed sign, etc.)
+export const isSignFeature = (feature) => {
+  if (!feature) return false;
+  const p = feature.properties || {};
+  if (p.isTrafficSign || p.motType) return true;
+
+  const layer = (p.layer || '').toUpperCase();
+  const text = (p.text || '').toUpperCase().trim();
+
+  // 1. Explicit sign layers or text
+  if (
+    layer.includes('SIGN') || layer.includes('STOP') || layer.includes('TRAFFIC') ||
+    layer.includes('SHAKH') || layer.includes('لوح') || layer.includes('شاخص')
+  ) {
+    return true;
+  }
+  if (text.includes('STOP') || text === 'قف' || text.includes('SLOW') || text === 'تمهل') {
+    return true;
+  }
+
+  // 2. Geometric STOP sign check: Octagon polygon/polyline with 8-12 vertices and diameter <= 3.5m
+  let rawCoords = null;
+  if (feature.geometry?.type === 'Polygon') {
+    rawCoords = feature.geometry.coordinates?.[0];
+  } else if (feature.geometry?.type === 'LineString') {
+    rawCoords = feature.geometry.coordinates;
+  }
+  if (rawCoords && rawCoords.length >= 8 && rawCoords.length <= 12) {
+    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    rawCoords.forEach(c => {
+      if (c[0] < minLng) minLng = c[0];
+      if (c[0] > maxLng) maxLng = c[0];
+      if (c[1] < minLat) minLat = c[1];
+      if (c[1] > maxLat) maxLat = c[1];
+    });
+    const spanMetersX = (maxLng - minLng) * 111320;
+    const spanMetersY = (maxLat - minLat) * 110574;
+    const maxDim = Math.max(spanMetersX, spanMetersY);
+    // Closed or nearly-closed octagon between 0.3m and 3.5m across
+    if (maxDim >= 0.3 && maxDim <= 3.5) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 // Helper: Classify a CAD GeoJSON feature into one of the 6 MOT functional groups
 const getFeatureFunctionalType = (feature) => {
   const p = feature.properties || {};
   if (p.functionalType && MOT_KEYMAP_GROUPS[p.functionalType]) {
     return p.functionalType;
   }
+
+  // Signs are NOT road lines
+  if (isSignFeature(feature)) {
+    return 'ANNOTATION_GUIDES';
+  }
+
   const layer = (p.layer || '').toUpperCase();
   const text = (p.text || '').toUpperCase();
   const cIdx = p.colorIndex;
   const col = (p.color || '').toUpperCase();
 
-  // 1. ANNOTATION_GUIDES
-  if (
-    p.isDimensionLine || p.isLeaderLine || p.tagType === 'dimension' ||
-    layer.includes('DIM') || layer.includes('LEADER') || layer.includes('ANNO') ||
-    layer.includes('STALBL') || layer.includes('DEFPOINTS') || layer.includes('NOTE') ||
-    p.tagType === 'coordinate' || text.startsWith('N:') || text.startsWith('E:')
-  ) {
-    return 'ANNOTATION_GUIDES';
-  }
-  // 2. PEDESTRIAN_ROUTE
-  if (
-    layer.includes('PED') || layer.includes('SIDEWALK') || layer.includes('WALK') ||
-    layer.includes('FOOTPATH') || layer.includes('RAMP') || text.includes('PEDESTRIAN') ||
-    text.includes('مشاة') || cIdx === 3 || col === '#00E676' || col === '#10B981'
-  ) {
-    return 'PEDESTRIAN_ROUTE';
-  }
-  // 3. DETOUR_TAPER
+  // 1. DETOUR_TAPER (Red lines, taper tapers, and transition texts like "180 M", "50 M", "المنطقة الانتقالية")
   if (
     cIdx === 1 || col === '#FF1744' || col === '#FF0000' || col === '#EF4444' ||
     layer.includes('DETOUR') || layer.includes('TAPER') || layer.includes('CLOSURE') ||
-    text.includes('TRANSITION') || text.includes('انتقالية') || text.includes('تحويلة')
+    text.includes('TRANSITION') || text.includes('انتقالية') || text.includes('تحويلة') ||
+    text.includes('180 M') || text.includes('50 M')
   ) {
     return 'DETOUR_TAPER';
   }
-  // 4. SAFETY_BUFFER
+
+  // 2. SAFETY_BUFFER (Yellow work lines, safety buffer, and work zone texts like "منطقة العمل", "المنطقة الفاصلة", "60 M", "20 M", "30 M")
   if (
     cIdx === 2 || cIdx === 40 || col === '#FFD600' || col === '#FFFF00' || col === '#F59E0B' ||
     p.isWorkZoneHatch || layer.includes('BUFFER') || layer.includes('SAFTY') ||
     layer.includes('SAFETY') || layer.includes('WORK') || layer.includes('HATCH') ||
     layer === '32' || layer === '1' || text.includes('BUFFER') || text.includes('فاصلة') ||
-    text.includes('WORK') || text.includes('عمل')
+    text.includes('WORK') || text.includes('عمل') ||
+    text.includes('60 M') || text.includes('20 M') || text.includes('30 M')
   ) {
     return 'SAFETY_BUFFER';
   }
-  // 5. ROAD_BOUNDARY
+
+  // 3. ROAD_BOUNDARY
   if (
     cIdx === 4 || col === '#00E5FF' || col === '#06B6D4' ||
     layer.includes('تنظيم') || layer.includes('ROAD') || layer.includes('LIMIT') ||
@@ -448,6 +488,26 @@ const getFeatureFunctionalType = (feature) => {
   ) {
     return 'ROAD_BOUNDARY';
   }
+
+  // 4. PEDESTRIAN_ROUTE
+  if (
+    layer.includes('PED') || layer.includes('SIDEWALK') || layer.includes('WALK') ||
+    layer.includes('FOOTPATH') || layer.includes('RAMP') || text.includes('PEDESTRIAN') ||
+    text.includes('مشاة') || cIdx === 3 || col === '#00E676' || col === '#10B981'
+  ) {
+    return 'PEDESTRIAN_ROUTE';
+  }
+
+  // 5. ANNOTATION_GUIDES
+  if (
+    p.isDimensionLine || p.isLeaderLine || p.tagType === 'dimension' ||
+    layer.includes('DIM') || layer.includes('LEADER') || layer.includes('ANNO') ||
+    layer.includes('STALBL') || layer.includes('DEFPOINTS') || layer.includes('NOTE') ||
+    p.tagType === 'coordinate' || text.startsWith('N:') || text.startsWith('E:')
+  ) {
+    return 'ANNOTATION_GUIDES';
+  }
+
   // 6. CENTERLINE_AXIS
   return 'CENTERLINE_AXIS';
 };
@@ -502,6 +562,14 @@ const DwgMapOverlay = ({
   const [activePaletteCategory, setActivePaletteCategory] = useState('posters');
   const [stepMeters, setStepMeters] = useState(1.0); // 0.1, 1.0, 5.0
   const [showWorkZoneCorridor, setShowWorkZoneCorridor] = useState(true);
+  const [showControlNodes, setShowControlNodes] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
+  const [selectedEditFeatureIdx, setSelectedEditFeatureIdx] = useState(null);
+
+  // ── History Stack for Revert & Forward (Undo / Redo) CAD Line Changes ──
+  const [historyStack, setHistoryStack] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const dragSnapshotRef = useRef(null);
 
   // ── Refs ──
   const mapContainerRef = useRef(null);
@@ -509,6 +577,7 @@ const DwgMapOverlay = ({
   const baseTileLayerRef = useRef(null);
   const geoJsonLayerRef = useRef(null);
   const workZoneLayerRef = useRef(null);
+  const controlNodesLayerRef = useRef(null);
   const additionalGeoJsonLayersRef = useRef({});
   const markersLayerRef = useRef(null);
   const dragHandleRef = useRef(null);
@@ -517,6 +586,65 @@ const DwgMapOverlay = ({
   const workerRef = useRef(null);
 
   const isMapActive = uploadStatus === 'done' || dwgData !== null;
+
+  // Initialize history stack when DWG data arrives
+  useEffect(() => {
+    if (dwgData?.geojson) {
+      setHistoryStack(prev => {
+        if (prev.length === 0) {
+          return [JSON.parse(JSON.stringify(dwgData.geojson))];
+        }
+        return prev;
+      });
+      setHistoryIndex(prev => (prev === -1 ? 0 : prev));
+    }
+  }, [dwgData?.geojson]);
+
+  // Revert to previous CAD geometry state
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0 && historyStack[historyIndex - 1]) {
+      const prevGeojson = historyStack[historyIndex - 1];
+      const newIdx = historyIndex - 1;
+      setHistoryIndex(newIdx);
+      setDwgData(current => current ? ({
+        ...current,
+        geojson: JSON.parse(JSON.stringify(prevGeojson))
+      }) : null);
+    }
+  }, [historyIndex, historyStack]);
+
+  // Forward to next CAD geometry state
+  const handleRedo = useCallback(() => {
+    if (historyIndex < historyStack.length - 1 && historyStack[historyIndex + 1]) {
+      const nextGeojson = historyStack[historyIndex + 1];
+      const newIdx = historyIndex + 1;
+      setHistoryIndex(newIdx);
+      setDwgData(current => current ? ({
+        ...current,
+        geojson: JSON.parse(JSON.stringify(nextGeojson))
+      }) : null);
+    }
+  }, [historyIndex, historyStack]);
+
+  // Global Keyboard Shortcuts (Ctrl+Z / Ctrl+Y / Cmd+Shift+Z)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   // Sync preloaded DWG data when passed
   useEffect(() => {
@@ -549,6 +677,79 @@ const DwgMapOverlay = ({
       }
     }
   }, [preloadedDwgData, anchorLat]);
+
+  // Auto-extract sign markers (STOP signs, etc.) from CAD geometric entities & detected signs
+  useEffect(() => {
+    if (!dwgData) return;
+
+    if (dwgData.detectedMotSigns?.length > 0) {
+      setPlacedElements(prev => {
+        const merged = [...dwgData.detectedMotSigns];
+        prev.forEach(p => {
+          if (!merged.some(m => Math.hypot(m.lat - p.lat, m.lng - p.lng) < 0.00005)) {
+            merged.push(p);
+          }
+        });
+        return merged;
+      });
+    }
+
+    if (!dwgData.geojson?.features) return;
+    const signFeatures = dwgData.geojson.features.filter(isSignFeature);
+    if (signFeatures.length === 0) return;
+
+    setPlacedElements(prev => {
+      const existing = [...prev];
+      signFeatures.forEach((sf, idx) => {
+        let centroid = null;
+        if (sf.geometry?.type === 'Point') {
+          centroid = sf.geometry.coordinates;
+        } else if (sf.geometry?.type === 'Polygon') {
+          const ring = sf.geometry.coordinates[0] || [];
+          if (ring.length > 0) {
+            const avgLng = ring.reduce((sum, c) => sum + c[0], 0) / ring.length;
+            const avgLat = ring.reduce((sum, c) => sum + c[1], 0) / ring.length;
+            centroid = [avgLng, avgLat];
+          }
+        } else if (sf.geometry?.type === 'LineString') {
+          const pts = sf.geometry.coordinates || [];
+          if (pts.length > 0) {
+            const avgLng = pts.reduce((sum, c) => sum + c[0], 0) / pts.length;
+            const avgLat = pts.reduce((sum, c) => sum + c[1], 0) / pts.length;
+            centroid = [avgLng, avgLat];
+          }
+        }
+
+        if (centroid) {
+          const [lng, lat] = centroid;
+          const exists = existing.some(el => Math.hypot(el.lat - lat, el.lng - lng) < 0.00005);
+          if (!exists) {
+            const text = (sf.properties?.text || '').toUpperCase();
+            let type = 'stop_sign';
+            let labelAr = 'لوحة قف (STOP)';
+
+            if (text.includes('SLOW') || text.includes('تمهل')) {
+              type = 'slow_sign';
+              labelAr = 'لوحة تمهل (SLOW)';
+            } else if (text.includes('50')) {
+              type = 'speed_limit_50';
+              labelAr = 'تحديد سرعة ٥٠';
+            }
+
+            existing.push({
+              id: `cad_sign_${Date.now()}_${idx}`,
+              type,
+              lat,
+              lng,
+              rotation: sf.properties?.rotationDeg || 0,
+              labelAr
+            });
+          }
+        }
+      });
+      return existing;
+    });
+  }, [dwgData?.geojson]);
 
   // Compute live feature counts per functional group
   const featureCounts = useMemo(() => {
@@ -731,8 +932,16 @@ const DwgMapOverlay = ({
       features: geojson.features.filter(f => {
         const props = f.properties || {};
 
-        // Hide raw CAD sign geometry if replaced by MOT markers
-        if (props.layer?.toUpperCase().includes('SIGN') || props.keymapId === 'signage' || props.isTrafficSign) {
+        // Hide raw CAD sign geometry if replaced by MOT markers (e.g. STOP signs, SLOW signs, etc.)
+        if (
+          isSignFeature(f) ||
+          props.layer?.toUpperCase().includes('SIGN') ||
+          props.keymapId === 'signage' ||
+          props.isTrafficSign ||
+          props.motType ||
+          (props.isBlockChild && (isSignFeature(f) || props.colorIndex === 1 || props.colorIndex === 2)) ||
+          (props.isShortLine && props.isBlockChild)
+        ) {
           return false;
         }
 
@@ -817,6 +1026,10 @@ const DwgMapOverlay = ({
         const groupDef = MOT_KEYMAP_GROUPS[functionalType] || MOT_KEYMAP_GROUPS.ANNOTATION_GUIDES;
 
         if (props.text) {
+          // If labels are toggled off by the user, suppress text badges
+          if (!showLabels) {
+            return window.L.circleMarker(latlng, { radius: 0, opacity: 0, fillOpacity: 0 });
+          }
           const rawText = props.text.trim();
           const upperText = rawText.toUpperCase();
           const rot = (props.rotationDeg || 0) + cadRotationDeg;
@@ -1068,6 +1281,50 @@ const DwgMapOverlay = ({
     }
   }, [mapReady, dwgData, keymapVisibility, alignOffsetX, alignOffsetY, cadRotationDeg, isLocked, anchorLat, anchorLng, isAr]);
 
+  // ── Helper: Classify lines for 6-Node Control Point Editing (RED, YELLOW, BLUE only; NEVER WHITE) ──
+  const getLineTargetCategory = useCallback((feature) => {
+    if (!feature || !feature.geometry) return null;
+    const p = feature.properties || {};
+    const functionalType = getFeatureFunctionalType(feature);
+    const col = (p.color || '').toUpperCase();
+    const layer = (p.layer || '').toUpperCase();
+    const colorIndex = p.colorIndex;
+
+    // ❌ EXCLUDE white lines, leaders, centerlines, annotations, and pedestrian routes
+    if (p.isLeaderLine || functionalType === 'CENTERLINE_AXIS' || functionalType === 'ANNOTATION_GUIDES' || functionalType === 'PEDESTRIAN_ROUTE') {
+      return null;
+    }
+    if (col === '#FFFFFF' || col === '#FFF' || col === '#F8FAFC' || col === '#E2E8F0' || col === '#CBD5E1' || col === '#94A3B8' || colorIndex === 7 || colorIndex === 256 || colorIndex === 8 || colorIndex === 9) {
+      return null;
+    }
+
+    // 🔴 1. RED LINES (Detour taper / Transition zones)
+    if (functionalType === 'DETOUR_TAPER' ||
+        colorIndex === 1 || colorIndex === 10 || colorIndex === 200 || colorIndex === 240 ||
+        col === '#EF4444' || col === '#FF0000' || col === '#DC2626' || col === '#B91C1C' ||
+        layer.includes('TAPER') || layer.includes('DETOUR') || layer.includes('انتقال')) {
+      return 'red';
+    }
+
+    // 🟡 2. YELLOW / AMBER LINES (Work Zone / Safety Buffer / Trench)
+    if (functionalType === 'SAFETY_BUFFER' ||
+        colorIndex === 2 || colorIndex === 40 || colorIndex === 50 ||
+        col === '#FFFF00' || col === '#F59E0B' || col === '#FACC15' || col === '#EAB308' || col === '#FFD700' ||
+        layer.includes('عمل') || layer.includes('WORK') || layer.includes('TRENCH') || layer.includes('BUFFER')) {
+      return 'yellow';
+    }
+
+    // 🔵 3. BLUE / CYAN LINES (Road Boundary / Planning Limits)
+    if (functionalType === 'ROAD_BOUNDARY' ||
+        colorIndex === 4 || colorIndex === 5 || colorIndex === 130 || colorIndex === 140 || colorIndex === 150 ||
+        col === '#06B6D4' || col === '#3B82F6' || col === '#0284C7' || col === '#00FFFF' || col === '#0000FF' ||
+        layer.includes('BOUND') || layer.includes('ROAD') || layer.includes('REG') || layer.includes('تنظيم')) {
+      return 'blue';
+    }
+
+    return null;
+  }, []);
+
   // ── 4b. Render Working Area Corridor & Zones Sketch Overlay (Following Actual Yellow CAD Line "منطقة عمل") ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -1108,8 +1365,9 @@ const DwgMapOverlay = ({
 
     const allFeatures = dwgData.geojson?.features || [];
 
-    // ── 1. Find the ACTUAL Yellow CAD Line ("منطقة عمل" / Work Zone) ──
+    // ── 1. Find the ACTUAL Yellow CAD Line ("منطقة عمل" / Work Zone) (Excluding signs) ──
     const yellowWorkFeatures = allFeatures.filter(f => {
+      if (isSignFeature(f)) return false;
       const p = f.properties || {};
       const col = (p.color || '').toUpperCase();
       const layer = (p.layer || '').toUpperCase();
@@ -1118,8 +1376,9 @@ const DwgMapOverlay = ({
       return (isYellow || isWorkLayer) && (f.geometry?.type === 'LineString' || f.geometry?.type === 'Polygon');
     });
 
-    // ── 2. Find the ACTUAL Red CAD Taper Lines ("المنطقة الانتقالية" / Transition Zone) ──
+    // ── 2. Find the ACTUAL Red CAD Taper Lines ("المنطقة الانتقالية" / Transition Zone) (Excluding signs) ──
     const redTaperFeatures = allFeatures.filter(f => {
+      if (isSignFeature(f)) return false;
       const p = f.properties || {};
       const col = (p.color || '').toUpperCase();
       const layer = (p.layer || '').toUpperCase();
@@ -1128,13 +1387,20 @@ const DwgMapOverlay = ({
       return (isRed || isTaperLayer) && (f.geometry?.type === 'LineString' || f.geometry?.type === 'Polygon');
     });
 
-    // ── 3. Render Shaded Corridor along the Actual Yellow Line ("منطقة عمل") ──
-    if (yellowWorkFeatures.length > 0) {
-      yellowWorkFeatures.forEach((feat, idx) => {
+    // ── 3. Render Shaded Corridor along the Actual Yellow Line ("منطقة عمل") without Self-Intersection ──
+    if (keymapVisibility.SAFETY_BUFFER !== false && yellowWorkFeatures.length > 0) {
+      let longestYellowMidPoint = null;
+      let maxYellowPts = -1;
+
+      yellowWorkFeatures.forEach((feat) => {
         const rawCoords = feat.geometry?.type === 'Polygon' ? feat.geometry.coordinates[0] : feat.geometry.coordinates;
         if (!rawCoords || rawCoords.length < 2) return;
 
         const shifted = rawCoords.map(c => transformPoint(c[1], c[0]));
+        if (shifted.length > maxYellowPts) {
+          maxYellowPts = shifted.length;
+          longestYellowMidPoint = shifted[Math.floor(shifted.length / 2)];
+        }
 
         // Primary vivid yellow CAD line
         window.L.polyline(shifted, {
@@ -1145,39 +1411,32 @@ const DwgMapOverlay = ({
           lineJoin: 'round'
         }).addTo(layerGroup);
 
-        // Highlighted trench corridor polygon around the yellow line (4.2m width)
-        const corridorPolygon = [];
+        // Non-collapsing corridor polygon around the yellow line (4.2m width)
+        const leftSide = [];
+        const rightSide = [];
         const halfWidthMeters = 2.1;
+
         for (let i = 0; i < shifted.length - 1; i++) {
           const p1 = shifted[i];
           const p2 = shifted[i + 1];
           const dy = (p2[0] - p1[0]) * 110574.61;
           const dx = (p2[1] - p1[1]) * (111320 * cosLat);
-          const len = Math.hypot(dx, dy) || 1;
+          const len = Math.hypot(dx, dy);
+          if (len < 0.2) continue;
+
           const nx = (-dy / len) * halfWidthMeters * mToLng;
           const ny = (dx / len) * halfWidthMeters * mToLat;
 
           if (i === 0) {
-            corridorPolygon.push([p1[0] + ny, p1[1] + nx]);
+            leftSide.push([p1[0] + ny, p1[1] + nx]);
+            rightSide.push([p1[0] - ny, p1[1] - nx]);
           }
-          corridorPolygon.push([p2[0] + ny, p2[1] + nx]);
-        }
-        for (let i = shifted.length - 1; i > 0; i--) {
-          const p1 = shifted[i - 1];
-          const p2 = shifted[i];
-          const dy = (p2[0] - p1[0]) * 110574.61;
-          const dx = (p2[1] - p1[1]) * (111320 * cosLat);
-          const len = Math.hypot(dx, dy) || 1;
-          const nx = (-dy / len) * halfWidthMeters * mToLng;
-          const ny = (dx / len) * halfWidthMeters * mToLat;
-
-          corridorPolygon.push([p2[0] - ny, p2[1] - nx]);
-          if (i === 1) {
-            corridorPolygon.push([p1[0] - ny, p1[1] - nx]);
-          }
+          leftSide.push([p2[0] + ny, p2[1] + nx]);
+          rightSide.push([p2[0] - ny, p2[1] - nx]);
         }
 
-        if (corridorPolygon.length >= 3) {
+        if (leftSide.length >= 2 && rightSide.length >= 2) {
+          const corridorPolygon = [...leftSide, ...rightSide.reverse()];
           window.L.polygon(corridorPolygon, {
             color: '#F59E0B',
             weight: 2.5,
@@ -1187,11 +1446,11 @@ const DwgMapOverlay = ({
             dashArray: '5, 5'
           }).addTo(layerGroup);
         }
+      });
 
-        // Anchor Badge at Midpoint of the yellow line
-        const midIdx = Math.floor(shifted.length / 2);
-        const midPoint = shifted[midIdx];
-        window.L.marker(midPoint, {
+      // Place exactly ONE consolidated badge for the entire Work Zone (if showLabels is true)
+      if (showLabels && longestYellowMidPoint) {
+        window.L.marker(longestYellowMidPoint, {
           icon: window.L.divIcon({
             className: 'zone-sketch-badge',
             html: `<div style="
@@ -1216,59 +1475,23 @@ const DwgMapOverlay = ({
             iconAnchor: [80, 12]
           })
         }).addTo(layerGroup);
-      });
-    } else {
-      // Fallback if CAD does not tag yellow color: generate aligned work corridor
-      const wzPoints = [
-        transformPoint(originLat + 10 * mToLat, originLng - 25 * mToLng),
-        transformPoint(originLat + 45 * mToLat, originLng - 45 * mToLng),
-        transformPoint(originLat + 50 * mToLat, originLng - 38 * mToLng),
-        transformPoint(originLat + 15 * mToLat, originLng - 18 * mToLng)
-      ];
-
-      const workPoly = window.L.polygon(wzPoints, {
-        color: '#F59E0B',
-        weight: 3.5,
-        opacity: 0.95,
-        fillColor: '#F59E0B',
-        fillOpacity: 0.28,
-        dashArray: '6, 6'
-      }).addTo(layerGroup);
-
-      window.L.marker(workPoly.getBounds().getCenter(), {
-        icon: window.L.divIcon({
-          className: 'zone-sketch-badge',
-          html: `<div style="
-            background: rgba(245, 158, 11, 0.95);
-            color: #ffffff;
-            font-family: system-ui, sans-serif;
-            font-size: 11px;
-            font-weight: 800;
-            padding: 3px 8px;
-            border-radius: 6px;
-            border: 1.5px solid #ffffff;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-            white-space: nowrap;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-          ">
-            <span>🚧</span>
-            <span>${isAr ? 'منطقة العمل (60M)' : 'Work Zone (60M)'}</span>
-          </div>`,
-          iconSize: [160, 24],
-          iconAnchor: [80, 12]
-        })
-      }).addTo(layerGroup);
+      }
     }
 
     // ── 4. Render Shaded Corridor along the Actual Red Lines ("المنطقة الانتقالية") ──
-    if (redTaperFeatures.length > 0) {
+    if (keymapVisibility.DETOUR_TAPER !== false && redTaperFeatures.length > 0) {
+      let longestRedMidPoint = null;
+      let maxRedPts = -1;
+
       redTaperFeatures.forEach((feat) => {
         const rawCoords = feat.geometry?.type === 'Polygon' ? feat.geometry.coordinates[0] : feat.geometry.coordinates;
         if (!rawCoords || rawCoords.length < 2) return;
 
         const shifted = rawCoords.map(c => transformPoint(c[1], c[0]));
+        if (shifted.length > maxRedPts) {
+          maxRedPts = shifted.length;
+          longestRedMidPoint = shifted[Math.floor(shifted.length / 2)];
+        }
 
         window.L.polyline(shifted, {
           color: '#EF4444',
@@ -1277,9 +1500,11 @@ const DwgMapOverlay = ({
           lineCap: 'round',
           lineJoin: 'round'
         }).addTo(layerGroup);
+      });
 
-        const midIdx = Math.floor(shifted.length / 2);
-        window.L.marker(shifted[midIdx], {
+      // Place exactly ONE consolidated badge for the entire Transition Zone (if showLabels is true)
+      if (showLabels && longestRedMidPoint) {
+        window.L.marker(longestRedMidPoint, {
           icon: window.L.divIcon({
             className: 'zone-sketch-badge',
             html: `<div style="
@@ -1304,61 +1529,300 @@ const DwgMapOverlay = ({
             iconAnchor: [90, 12]
           })
         }).addTo(layerGroup);
-      });
+      }
     }
 
-    // ── 5. Concrete & Plastic NJB Annotation Callout Boxes ──
-    const njb1Pos = transformPoint(originLat - 15 * mToLat, originLng - 40 * mToLng);
-    window.L.marker(njb1Pos, {
-      icon: window.L.divIcon({
-        className: 'njb-callout-box',
-        html: `<div style="
-          background: #dc2626;
-          color: #ffffff;
-          font-family: system-ui, monospace, sans-serif;
-          font-size: 10px;
-          font-weight: 900;
-          padding: 4px 7px;
-          border-radius: 4px;
-          border: 1.5px solid #ffffff;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.7);
-          text-align: center;
-          line-height: 1.2;
-        ">
-          CONCRETE NJB NO GAP<br/>W/LIGHTS 3LINE
-        </div>`,
-        iconSize: [140, 36],
-        iconAnchor: [70, 18]
-      })
-    }).addTo(layerGroup);
+    // ── 5. Concrete & Plastic NJB Annotation Callout Boxes (if showLabels is true) ──
+    if (showLabels && keymapVisibility.ANNOTATION_GUIDES !== false) {
+      const njb1Pos = transformPoint(originLat - 15 * mToLat, originLng - 40 * mToLng);
+      window.L.marker(njb1Pos, {
+        icon: window.L.divIcon({
+          className: 'njb-callout-box',
+          html: `<div style="
+            background: #dc2626;
+            color: #ffffff;
+            font-family: system-ui, monospace, sans-serif;
+            font-size: 10px;
+            font-weight: 900;
+            padding: 4px 7px;
+            border-radius: 4px;
+            border: 1.5px solid #ffffff;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
+            text-align: center;
+            line-height: 1.2;
+          ">
+            CONCRETE NJB NO GAP<br/>W/LIGHTS 3LINE
+          </div>`,
+          iconSize: [140, 36],
+          iconAnchor: [70, 18]
+        })
+      }).addTo(layerGroup);
 
-    const njb2Pos = transformPoint(originLat + 5 * mToLat, originLng + 45 * mToLng);
-    window.L.marker(njb2Pos, {
-      icon: window.L.divIcon({
-        className: 'njb-callout-box',
-        html: `<div style="
-          background: #dc2626;
-          color: #ffffff;
-          font-family: system-ui, monospace, sans-serif;
-          font-size: 10px;
-          font-weight: 900;
-          padding: 4px 7px;
-          border-radius: 4px;
-          border: 1.5px solid #ffffff;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.7);
-          text-align: center;
-          line-height: 1.2;
-        ">
-          PLASTIC NJB NO GAP<br/>W/LIGHTS 3LINE
-        </div>`,
-        iconSize: [135, 36],
-        iconAnchor: [67, 18]
-      })
-    }).addTo(layerGroup);
+      const njb2Pos = transformPoint(originLat + 5 * mToLat, originLng + 45 * mToLng);
+      window.L.marker(njb2Pos, {
+        icon: window.L.divIcon({
+          className: 'njb-callout-box',
+          html: `<div style="
+            background: #dc2626;
+            color: #ffffff;
+            font-family: system-ui, monospace, sans-serif;
+            font-size: 10px;
+            font-weight: 900;
+            padding: 4px 7px;
+            border-radius: 4px;
+            border: 1.5px solid #ffffff;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
+            text-align: center;
+            line-height: 1.2;
+          ">
+            PLASTIC NJB NO GAP<br/>W/LIGHTS 3LINE
+          </div>`,
+          iconSize: [135, 36],
+          iconAnchor: [67, 18]
+        })
+      }).addTo(layerGroup);
+    }
 
     layerGroup.addTo(mapInstanceRef.current);
     workZoneLayerRef.current = layerGroup;
-  }, [mapReady, dwgData, showWorkZoneCorridor, alignOffsetX, alignOffsetY, cadRotationDeg, anchorLat, anchorLng, isAr]);
+  }, [mapReady, dwgData, showWorkZoneCorridor, showLabels, keymapVisibility, alignOffsetX, alignOffsetY, cadRotationDeg, anchorLat, anchorLng, isAr]);
+
+  // ── 4c. Render 6 Equidistant Draggable Control Nodes on RED, YELLOW, BLUE CAD Lines ONLY (No White Lines) ──
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+
+    // Clean up previous control nodes
+    if (controlNodesLayerRef.current) {
+      mapInstanceRef.current.removeLayer(controlNodesLayerRef.current);
+      controlNodesLayerRef.current = null;
+    }
+
+    if (!showControlNodes || !dwgData?.geojson?.features) return;
+
+    const nodesGroup = window.L.layerGroup();
+    const originLat = dwgData.centerLatLng ? dwgData.centerLatLng[0] : anchorLat;
+    const originLng = dwgData.centerLatLng ? dwgData.centerLatLng[1] : anchorLng;
+    const cosLat = Math.cos(originLat * Math.PI / 180);
+    const dLat = alignOffsetY / 110574.61;
+    const dLng = alignOffsetX / (111320 * cosLat);
+    const rotRad = (cadRotationDeg * Math.PI) / 180;
+
+    // Shift [lng, lat] coord from raw CAD space to display space
+    const shiftCoord = (c) => {
+      let lng = c[0] + dLng;
+      let lat = c[1] + dLat;
+      if (rotRad !== 0) {
+        const dx = (lng - originLng) * cosLat;
+        const dy = lat - originLat;
+        const cosR = Math.cos(rotRad);
+        const sinR = Math.sin(rotRad);
+        lng = originLng + (dx * cosR - dy * sinR) / cosLat;
+        lat = originLat + dx * sinR + dy * cosR;
+      }
+      return [lng, lat];
+    };
+
+    // Cumulative arc-lengths in METERS along a [lng,lat][] array
+    const computeArcLengths = (coords) => {
+      const d = [0];
+      for (let i = 1; i < coords.length; i++) {
+        const dx = (coords[i][0] - coords[i - 1][0]) * (111320 * cosLat);
+        const dy = (coords[i][1] - coords[i - 1][1]) * 110574.61;
+        d.push(d[i - 1] + Math.hypot(dx, dy));
+      }
+      return d;
+    };
+
+    // Interpolate [lng, lat] at targetDist along polyline
+    const interpolateAt = (coords, arcLen, targetDist) => {
+      for (let i = 1; i < coords.length; i++) {
+        if (arcLen[i] >= targetDist) {
+          const segLen = arcLen[i] - arcLen[i - 1];
+          const t = segLen > 0 ? (targetDist - arcLen[i - 1]) / segLen : 0;
+          return {
+            lng: coords[i - 1][0] + t * (coords[i][0] - coords[i - 1][0]),
+            lat: coords[i - 1][1] + t * (coords[i][1] - coords[i - 1][1]),
+            segIndex: i - 1,
+            fraction: targetDist / (arcLen[arcLen.length - 1] || 1)
+          };
+        }
+      }
+      const last = coords[coords.length - 1];
+      return { lng: last[0], lat: last[1], segIndex: coords.length - 2, fraction: 1 };
+    };
+
+    const NUM_NODES = 6;
+    let nodeCount = 0;
+
+    dwgData.geojson.features.forEach((feature, featureIdx) => {
+      // 🎯 FILTER: ONLY Red, Yellow, and Blue lines get control nodes! (White lines are ignored)
+      const targetCategory = getLineTargetCategory(feature);
+      if (!targetCategory) return;
+
+      const fnType = getFeatureFunctionalType(feature);
+      if (keymapVisibility[fnType] === false) return; // ❌ HIDE nodes immediately when line is hidden in keymap!
+
+      const p = feature.properties || {};
+      if (isSignFeature(feature) || p.isBlockChild || p.isShortLine || p.isTrafficSign || p.motType) {
+        return; // ❌ DO NOT attach nodes to signs, block children, or short lines!
+      }
+
+      const geom = feature.geometry;
+      if (!geom) return;
+
+      let rawCoords = null;
+      if (geom.type === 'LineString') rawCoords = geom.coordinates;
+      else if (geom.type === 'Polygon') rawCoords = geom.coordinates?.[0];
+      if (!rawCoords || rawCoords.length < 2) return;
+
+      // Apply alignment shift
+      const shifted = rawCoords.map(c => shiftCoord(c));
+      const arcLen = computeArcLengths(shifted);
+      const totalLen = arcLen[arcLen.length - 1];
+      if (totalLen < 5.0) return; // ❌ ONLY long lines (>= 5.0 meters) get control nodes! Skip short stubs and micro lines!
+
+      // 6 evenly-spaced positions
+      const nodes = [];
+      if (shifted.length === NUM_NODES) {
+        // Line has already been partitioned into exactly 6 nodes -> direct 1:1 mapping
+        for (let n = 0; n < NUM_NODES; n++) {
+          nodes.push({
+            lng: shifted[n][0],
+            lat: shifted[n][1],
+            nodeIndex: n,
+            fraction: n / (NUM_NODES - 1)
+          });
+        }
+      } else {
+        // First-time line: sample 6 equidistant points along the line
+        for (let n = 0; n < NUM_NODES; n++) {
+          const frac = n / (NUM_NODES - 1);
+          nodes.push({ ...interpolateAt(shifted, arcLen, frac * totalLen), nodeIndex: n });
+        }
+      }
+
+      // Draw nodes with color coded to category
+      nodes.forEach((pos) => {
+        const isEnd = pos.nodeIndex === 0 || pos.nodeIndex === NUM_NODES - 1;
+        const size = isEnd ? 14 : 11;
+
+        let bg = '#2563eb';
+        let border = '#93c5fd';
+        let glow = 'rgba(37,99,235,0.7)';
+
+        if (targetCategory === 'red') {
+          bg = isEnd ? '#ef4444' : '#f87171';
+          border = isEnd ? '#fca5a5' : '#fecaca';
+          glow = 'rgba(239,68,68,0.8)';
+        } else if (targetCategory === 'yellow') {
+          bg = isEnd ? '#eab308' : '#facc15';
+          border = isEnd ? '#fef08a' : '#fef9c3';
+          glow = 'rgba(234,179,8,0.8)';
+        } else if (targetCategory === 'blue') {
+          bg = isEnd ? '#0284c7' : '#38bdf8';
+          border = isEnd ? '#bae6fd' : '#e0f2fe';
+          glow = 'rgba(2,132,199,0.8)';
+        }
+
+        const marker = window.L.marker([pos.lat, pos.lng], {
+          draggable: !isLocked,
+          pane: 'cadMarkerPane',
+          zIndexOffset: isEnd ? 3500 : 3000,
+          icon: window.L.divIcon({
+            className: 'cad-control-node-marker',
+            html: `<div style="
+              width:${size}px;
+              height:${size}px;
+              border-radius:50%;
+              background:${bg};
+              border:2.5px solid ${border};
+              box-shadow:0 0 8px ${glow},0 2px 8px rgba(0,0,0,0.6);
+              cursor:${isLocked ? 'not-allowed' : 'grab'};
+              box-sizing:border-box;
+            "></div>`,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2]
+          })
+        });
+
+        marker.on('click', () => {
+          setSelectedEditFeatureIdx(prev => prev === featureIdx ? null : featureIdx);
+        });
+
+        if (!isLocked) {
+          marker.on('dragstart', (e) => {
+            if (e.target.getElement()) e.target.getElement().style.cursor = 'grabbing';
+            setSelectedEditFeatureIdx(featureIdx);
+            // Snapshot current state for Revert/Forward (Undo/Redo)
+            dragSnapshotRef.current = JSON.parse(JSON.stringify(dwgData.geojson));
+          });
+
+          marker.on('dragend', (e) => {
+            if (e.target.getElement()) e.target.getElement().style.cursor = 'grab';
+            const { lat: newLat, lng: newLng } = e.target.getLatLng();
+
+            // Reverse alignment shift to get raw CAD coord
+            let rLng = newLng;
+            let rLat = newLat;
+            if (rotRad !== 0) {
+              const dx = (rLng - originLng) * cosLat;
+              const dy = rLat - originLat;
+              const cosR = Math.cos(-rotRad);
+              const sinR = Math.sin(-rotRad);
+              rLng = originLng + (dx * cosR - dy * sinR) / cosLat;
+              rLat = originLat + dx * sinR + dy * cosR;
+            }
+            rLng -= dLng;
+            rLat -= dLat;
+
+            // Push to Undo/Redo history stack
+            if (dragSnapshotRef.current) {
+              setHistoryStack(hist => {
+                const trimmed = hist.slice(0, historyIndex + 1);
+                return [...trimmed, dragSnapshotRef.current];
+              });
+              setHistoryIndex(idx => idx + 1);
+              dragSnapshotRef.current = null;
+            }
+
+            setDwgData(prev => {
+              if (!prev?.geojson?.features?.[featureIdx]) return prev;
+              const next = JSON.parse(JSON.stringify(prev));
+              const feat = next.geojson.features[featureIdx];
+              let coords = feat.geometry.type === 'Polygon'
+                ? feat.geometry.coordinates[0]
+                : feat.geometry.coordinates;
+
+              // If geometry does not yet have exactly NUM_NODES vertices, resample it cleanly
+              if (coords.length !== NUM_NODES) {
+                const al = computeArcLengths(coords);
+                const total = al[al.length - 1] || 1;
+                const resampled = [];
+                for (let i = 0; i < NUM_NODES; i++) {
+                  const pt = interpolateAt(coords, al, (i / (NUM_NODES - 1)) * total);
+                  resampled.push([pt.lng, pt.lat]);
+                }
+                coords = resampled;
+              }
+
+              // Directly update the exact vertex corresponding to the dragged control node
+              coords[pos.nodeIndex] = [rLng, rLat];
+
+              if (feat.geometry.type === 'Polygon') feat.geometry.coordinates[0] = coords;
+              else feat.geometry.coordinates = coords;
+              return next;
+            });
+          });
+        }
+
+        marker.addTo(nodesGroup);
+        nodeCount++;
+      });
+    });
+
+    nodesGroup.addTo(mapInstanceRef.current);
+    controlNodesLayerRef.current = nodesGroup;
+  }, [mapReady, dwgData, showControlNodes, keymapVisibility, getLineTargetCategory, historyIndex, alignOffsetX, alignOffsetY, cadRotationDeg, isLocked, anchorLat, anchorLng, isAr]);
 
   // ── 5. Render Additional Files Overlays ──
   useEffect(() => {
@@ -1456,7 +1920,7 @@ const DwgMapOverlay = ({
     });
 
     if (onPlacementsChange) onPlacementsChange(placedElements);
-  }, [placedElements, selectedElementId, isAr]);
+  }, [mapReady, placedElements, selectedElementId, isAr]);
 
   // ── 7. In-Browser Client-Side CAD Parser (0 Server Calls) ──
   const parseCadInBrowser = useCallback(async (file) => {
@@ -1630,6 +2094,8 @@ const DwgMapOverlay = ({
     setCadRotationDeg(0);
     setSelectedFeatureInfo(null);
     setSelectedElementId(null);
+    setShowControlNodes(false);
+    setSelectedEditFeatureIdx(null);
   }, []);
 
   const handleAddElement = (typeId) => {
@@ -1791,6 +2257,71 @@ const DwgMapOverlay = ({
                   <Sparkles className="h-3.5 w-3.5 text-amber-300" />
                   <span>{isAr ? 'تظليل نطاق منطقة العمل ✨' : 'Highlight Work Zone ✨'}</span>
                 </button>
+
+                {/* 🏷️ TOGGLE LABELS & ZONE NAMES */}
+                <button
+                  type="button"
+                  onClick={() => setShowLabels(!showLabels)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
+                    showLabels
+                      ? 'bg-slate-800 text-cyan-300 border-cyan-500/50 ring-1 ring-cyan-500/30'
+                      : 'bg-slate-950 text-slate-400 hover:bg-slate-900 border-slate-800'
+                  }`}
+                  title={isAr ? 'إخفاء أو إظهار أسماء المناطق والنصوص والتسميات على المخطط' : 'Toggle Zone Names & Text Labels on Map'}
+                >
+                  <Tag className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>{isAr ? (showLabels ? 'إخفاء التسميات 🏷️' : 'إظهار التسميات 🏷️') : (showLabels ? 'Hide Labels 🏷️' : 'Show Labels 🏷️')}</span>
+                </button>
+
+                {/* 🔵 6-NODE CONTROL NODES EDITOR TOGGLE */}
+                <button
+                  type="button"
+                  onClick={() => { setShowControlNodes(!showControlNodes); if (showControlNodes) setSelectedEditFeatureIdx(null); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
+                    showControlNodes
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white border-blue-400 ring-2 ring-blue-400/40'
+                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
+                  }`}
+                  title={isAr ? 'إظهار 6 عُقد تحكم على الخطوط الحمراء والصفراء والزرقاء لتعديل المسار بدقة' : 'Show 6 control nodes on Red, Yellow, Blue lines for editing'}
+                >
+                  <Target className="h-3.5 w-3.5 text-blue-300" />
+                  <span>{isAr ? 'عُقد التحكم ⬡' : 'Control Nodes ⬡'}</span>
+                </button>
+
+                {/* ↶ REVERT (UNDO) & ↷ FORWARD (REDO) BUTTONS */}
+                <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl p-1 shadow">
+                  <button
+                    type="button"
+                    onClick={handleUndo}
+                    disabled={historyIndex <= 0}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition ${
+                      historyIndex > 0
+                        ? 'text-amber-400 hover:bg-slate-800 active:scale-95 cursor-pointer'
+                        : 'text-slate-600 cursor-not-allowed opacity-40'
+                    }`}
+                    title={isAr ? 'تراجع عن آخر تعديل للخطوط (Ctrl+Z)' : 'Undo last line edit (Ctrl+Z)'}
+                  >
+                    <Undo2 className="h-3.5 w-3.5" />
+                    <span>{isAr ? 'تراجع' : 'Undo'}</span>
+                  </button>
+
+                  <div className="w-[1px] h-3.5 bg-slate-700 mx-0.5" />
+
+                  <button
+                    type="button"
+                    onClick={handleRedo}
+                    disabled={historyIndex >= historyStack.length - 1}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition ${
+                      historyIndex < historyStack.length - 1
+                        ? 'text-amber-400 hover:bg-slate-800 active:scale-95 cursor-pointer'
+                        : 'text-slate-600 cursor-not-allowed opacity-40'
+                    }`}
+                    title={isAr ? 'إعادة التعديل للأمام (Ctrl+Y)' : 'Redo edit forward (Ctrl+Y)'}
+                  >
+                    <Redo2 className="h-3.5 w-3.5" />
+                    <span>{isAr ? 'إعادة' : 'Redo'}</span>
+                  </button>
+                </div>
 
                 {/* ➕ ADD ADDITIONAL CAD FILE BUTTON */}
                 <button

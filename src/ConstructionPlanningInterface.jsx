@@ -723,12 +723,8 @@ const ConstructionPlanningInterface = () => {
     };
   }, [boundaryPoints, detourNodes, pedestrianNodes]);
   
-  // State for custom milestones/timeline
-  const [milestones, setMilestones] = useState([
-    { id: 1, taskAr: 'تهيئة الموقع وتوفير المداخل', taskEn: 'Site Access & Mobilization', startDay: 1, durationDays: 5, status: 'Planned' },
-    { id: 2, taskAr: 'تركيب الحواجز الإرشادية والتحويلات المؤقتة', taskEn: 'Temporary Traffic Diversions Setups', startDay: 6, durationDays: 3, status: 'Planned' },
-    { id: 3, taskAr: 'أعمال الحفر وتمديد الخدمات الأرضية', taskEn: 'Excavation and Utility Crossings', startDay: 9, durationDays: 12, status: 'Planned' },
-  ]);
+  // State for custom milestones/timeline (Empty by default; populated by CAD extraction or user input)
+  const [milestones, setMilestones] = useState([]);
   const [newMilestone, setNewMilestone] = useState({ taskAr: '', taskEn: '', startDay: '', durationDays: '', status: 'Planned' });
   const [editingMilestoneId, setEditingMilestoneId] = useState(null);
   const [editMilestoneForm, setEditMilestoneForm] = useState({ taskAr: '', taskEn: '', startDay: 1, durationDays: 5 });
@@ -956,12 +952,8 @@ const ConstructionPlanningInterface = () => {
     }
   };
 
-  // State for Equipment & Systems Inventory
-  const [equipmentList, setEquipmentList] = useState([
-    { id: 1, nameAr: 'حفار كاتر بيلر ٣٢٠', nameEn: 'Caterpillar 320 Excavator', length: 9.4, width: 3.2, height: 3.1, systemAr: 'أعمال الحفر وتثبيت جوانب التربة', systemEn: 'Trench Excavation & Shoring' },
-    { id: 2, nameAr: 'رصاصة أسفلت ثنائية الأسطوانة', nameEn: 'Dynapac CC1200 Double Drum Roller', length: 2.4, width: 1.3, height: 2.7, systemAr: 'إعادة سفلتة وتمهيد الطريق', systemEn: 'Asphalt Restoration & Paving' },
-    { id: 3, nameAr: 'برج إضاءة متنقل', nameEn: 'Doosan G150 Mobile Light Tower', length: 4.1, width: 1.8, height: 2.2, systemAr: 'إنارة منطقة العمل للمناوبات الليلية', systemEn: 'Night-Shift Work Zone Lighting' },
-  ]);
+  // State for Equipment & Systems Inventory (Empty by default; populated by CAD extraction or user input)
+  const [equipmentList, setEquipmentList] = useState([]);
   const [newEquipment, setNewEquipment] = useState({
     selectedPreset: '',
     selectedRolePreset: '',
@@ -1062,94 +1054,94 @@ const ConstructionPlanningInterface = () => {
       setFormData(prev => ({
         ...prev,
         // Phase 1: General Project Details
-        clientNameAr: extractedInfo.clientNameAr || prev.clientNameAr || 'أمانة منطقة المدينة المنورة',
-        clientNameEn: extractedInfo.clientNameEn || prev.clientNameEn || 'Al-Madinah Al-Munawwarah Municipality',
-        projectNameAr: extractedInfo.projectNameAr || prev.projectNameAr || `مشروع اعتماد وتأمين التحويلة المرورية - ${extractedInfo.streetNameAr || ''}`,
-        projectNameEn: extractedInfo.projectNameEn || prev.projectNameEn || `Traffic Detour & Safety Plan - ${extractedInfo.streetNameEn || ''}`,
-        contractingCompanyAr: extractedInfo.contractingCompanyAr || prev.contractingCompanyAr || 'شركة مقاولات البنية التحتية بالمدينة المنورة',
-        contractingCompanyEn: extractedInfo.contractingCompanyEn || prev.contractingCompanyEn || 'Madinah Infrastructure & Contracting Co.',
-        consultantNameAr: extractedInfo.consultantNameAr || prev.consultantNameAr || 'المكتب الهندسي الاستشاري المعتمد - دار الإشراف',
-        consultantNameEn: extractedInfo.consultantNameEn || prev.consultantNameEn || 'Engineering Supervision Consultants',
-        projectManagerAr: extractedInfo.projectManagerAr || prev.projectManagerAr || 'م. فهد الحربي',
-        projectManagerEn: extractedInfo.projectManagerEn || prev.projectManagerEn || 'Eng. Fahad Al-Harbi',
-        ownerClassification: extractedInfo.ownerClassification || prev.ownerClassification || 'affiliated',
-        roadNameAr: extractedInfo.streetNameAr || prev.roadNameAr,
-        roadNameEn: extractedInfo.streetNameEn || prev.roadNameEn,
-        locationAr: extractedInfo.locationAr || prev.locationAr,
-        locationEn: extractedInfo.locationEn || prev.locationEn,
-        coordinates: extractedInfo.coordinates || prev.coordinates,
-        permitStartDate: extractedInfo.permitStartDate || prev.permitStartDate,
-        permitEndDate: extractedInfo.permitEndDate || prev.permitEndDate,
-        workStartDate: extractedInfo.workStartDate || prev.workStartDate,
-        workEndDate: extractedInfo.workEndDate || prev.workEndDate,
-        detailedTimeline: extractedInfo.detailedTimeline || prev.detailedTimeline,
+        clientNameAr: extractedInfo.clientNameAr || prev.clientNameAr || '',
+        clientNameEn: extractedInfo.clientNameEn || prev.clientNameEn || '',
+        projectNameAr: extractedInfo.projectNameAr || (extractedInfo.streetNameAr ? `مشروع تحويلة ${extractedInfo.streetNameAr}` : prev.projectNameAr) || '',
+        projectNameEn: extractedInfo.projectNameEn || (extractedInfo.streetNameEn ? `Traffic Detour Plan - ${extractedInfo.streetNameEn}` : prev.projectNameEn) || '',
+        contractingCompanyAr: extractedInfo.contractingCompanyAr || prev.contractingCompanyAr || '',
+        contractingCompanyEn: extractedInfo.contractingCompanyEn || prev.contractingCompanyEn || '',
+        consultantNameAr: extractedInfo.consultantNameAr || prev.consultantNameAr || '',
+        consultantNameEn: extractedInfo.consultantNameEn || prev.consultantNameEn || '',
+        projectManagerAr: extractedInfo.projectManagerAr || prev.projectManagerAr || '',
+        projectManagerEn: extractedInfo.projectManagerEn || prev.projectManagerEn || '',
+        ownerClassification: extractedInfo.ownerClassification || prev.ownerClassification || '',
+        roadNameAr: extractedInfo.streetNameAr || prev.roadNameAr || '',
+        roadNameEn: extractedInfo.streetNameEn || prev.roadNameEn || '',
+        locationAr: extractedInfo.locationAr || prev.locationAr || '',
+        locationEn: extractedInfo.locationEn || prev.locationEn || '',
+        coordinates: extractedInfo.coordinates || prev.coordinates || '',
+        permitStartDate: extractedInfo.permitStartDate || prev.permitStartDate || '',
+        permitEndDate: extractedInfo.permitEndDate || prev.permitEndDate || '',
+        workStartDate: extractedInfo.workStartDate || prev.workStartDate || '',
+        workEndDate: extractedInfo.workEndDate || prev.workEndDate || '',
+        detailedTimeline: extractedInfo.detailedTimeline || prev.detailedTimeline || '',
 
         // Phase 1: Road Classification & Nature
-        workPurposeAr: extractedInfo.workPurposeAr || prev.workPurposeAr || 'أعمال حفر وتمديد مرافق البنية التحتية والربط المروري',
-        workPurposeEn: extractedInfo.workPurposeEn || prev.workPurposeEn || 'Infrastructure utilities trench excavation and road corridor integration',
-        owningUtilityAr: extractedInfo.owningUtilityAr || prev.owningUtilityAr || 'الإدارة العامة للمشاريع والصيانة - أمانة منطقة المدينة المنورة',
-        owningUtilityEn: extractedInfo.owningUtilityEn || prev.owningUtilityEn || 'General Directorate of Projects & Road Maintenance',
-        roadClassification: extractedInfo.roadClassification || prev.roadClassification || 'main',
-        trafficVolumeLevel: extractedInfo.trafficVolumeLevel || prev.trafficVolumeLevel || 'high',
-        workDurationCategory: extractedInfo.workDurationCategory || prev.workDurationCategory || 'medium',
-        diversionLengthM: extractedInfo.dimensions?.totalDetourLengthM || prev.diversionLengthM,
-        pedestrianPathProvided: true,
-        pedestrianPathWidth: 1.5,
+        workPurposeAr: extractedInfo.workPurposeAr || prev.workPurposeAr || '',
+        workPurposeEn: extractedInfo.workPurposeEn || prev.workPurposeEn || '',
+        owningUtilityAr: extractedInfo.owningUtilityAr || prev.owningUtilityAr || '',
+        owningUtilityEn: extractedInfo.owningUtilityEn || prev.owningUtilityEn || '',
+        roadClassification: extractedInfo.roadClassification || prev.roadClassification || '',
+        trafficVolumeLevel: extractedInfo.trafficVolumeLevel || prev.trafficVolumeLevel || '',
+        workDurationCategory: extractedInfo.workDurationCategory || prev.workDurationCategory || '',
+        diversionLengthM: extractedInfo.dimensions?.totalDetourLengthM || prev.diversionLengthM || '',
+        pedestrianPathProvided: Boolean(extractedInfo.hasPedestrianPath || prev.pedestrianPathProvided),
+        pedestrianPathWidth: extractedInfo.pedestrianPathWidth || prev.pedestrianPathWidth || '',
 
         // Phase 1: Dimensions & Clearances
-        siteLength: extractedInfo.dimensions?.totalDetourLengthM || prev.siteLength,
-        siteWidth: extractedInfo.dimensions?.siteWidthM || prev.siteWidth || 35,
-        lateralClearance: extractedInfo.dimensions?.lateralClearanceM || prev.lateralClearance || 2.5,
-        longitudinalBuffer: extractedInfo.dimensions?.longitudinalBufferM || prev.longitudinalBuffer || 130,
-        trenchLength: extractedInfo.dimensions?.trenchLengthM || prev.trenchLength || 60,
-        trenchWidth: extractedInfo.dimensions?.trenchWidthM || prev.trenchWidth || 4.2,
-        closedLaneWidth: extractedInfo.dimensions?.closedLaneWidthM || prev.closedLaneWidth || 3.75,
-        closedLanesCount: extractedInfo.dimensions?.closedLanesCount || prev.closedLanesCount || 1,
-        activeLanesCount: extractedInfo.dimensions?.activeLanesCount || prev.activeLanesCount || 2,
-        activeLanesLeftCount: extractedInfo.dimensions?.activeLanesLeftCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.floor(extractedInfo.dimensions.activeLanesCount / 2)) : 1),
-        activeLanesRightCount: extractedInfo.dimensions?.activeLanesRightCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.ceil(extractedInfo.dimensions.activeLanesCount / 2)) : 1),
-        detourLanesPlacement: extractedInfo.dimensions?.detourLanesPlacement || (extractedInfo.isMultiLaneDivided ? 'dual' : 'right'),
-        totalLanesCount: extractedInfo.dimensions?.totalLanesCount || prev.totalLanesCount || 3,
-        stagingAreaAr: `ساحة التشوين والمعدات المعتمدة بالقرب من بداية مسار ${extractedInfo.streetNameAr || ''}`,
-        stagingAreaEn: `Approved material staging area near detour approach - ${extractedInfo.streetNameEn || ''}`,
-        hardZoneClassAr: 'منطقة الحفر المفتوح (عالية الخطورة - خندق محمي بالصبات)',
-        hardZoneClassEn: 'Open Excavation Trench (High Hazard - Jersey Barrier Protected)',
+        siteLength: extractedInfo.dimensions?.totalDetourLengthM || prev.siteLength || '',
+        siteWidth: extractedInfo.dimensions?.siteWidthM || prev.siteWidth || '',
+        lateralClearance: extractedInfo.dimensions?.lateralClearanceM || prev.lateralClearance || '',
+        longitudinalBuffer: extractedInfo.dimensions?.longitudinalBufferM || prev.longitudinalBuffer || '',
+        trenchLength: extractedInfo.dimensions?.trenchLengthM || prev.trenchLength || '',
+        trenchWidth: extractedInfo.dimensions?.trenchWidthM || prev.trenchWidth || '',
+        closedLaneWidth: extractedInfo.dimensions?.closedLaneWidthM || prev.closedLaneWidth || '',
+        closedLanesCount: extractedInfo.dimensions?.closedLanesCount || prev.closedLanesCount || '',
+        activeLanesCount: extractedInfo.dimensions?.activeLanesCount || prev.activeLanesCount || '',
+        activeLanesLeftCount: extractedInfo.dimensions?.activeLanesLeftCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.floor(extractedInfo.dimensions.activeLanesCount / 2)) : prev.activeLanesLeftCount || ''),
+        activeLanesRightCount: extractedInfo.dimensions?.activeLanesRightCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.ceil(extractedInfo.dimensions.activeLanesCount / 2)) : prev.activeLanesRightCount || ''),
+        detourLanesPlacement: extractedInfo.dimensions?.detourLanesPlacement || prev.detourLanesPlacement || (extractedInfo.isMultiLaneDivided ? 'dual' : 'right'),
+        totalLanesCount: extractedInfo.dimensions?.totalLanesCount || prev.totalLanesCount || '',
+        stagingAreaAr: extractedInfo.streetNameAr ? `ساحة التشوين والمعدات المعتمدة بالقرب من مسار ${extractedInfo.streetNameAr}` : (prev.stagingAreaAr || ''),
+        stagingAreaEn: extractedInfo.streetNameEn ? `Approved material staging area near ${extractedInfo.streetNameEn}` : (prev.stagingAreaEn || ''),
+        hardZoneClassAr: extractedInfo.hardZoneClassAr || prev.hardZoneClassAr || '',
+        hardZoneClassEn: extractedInfo.hardZoneClassEn || prev.hardZoneClassEn || '',
 
         // Phase 2: Barrier & Trench Plate Engineering
-        excavationDepth: 200,
-        barrierLateralClearance: 0.8,
-        steelPlateThickness: 30,
-        bearingWidthLeft: 40,
-        bearingWidthRight: 40,
-        flushMillingDepth: 30,
-        antiSlipApplied: true,
-        mechanicalAnchoring: true,
-        isArterialRoad: true,
-        attenuatorType: 'mash_tl3',
-        attenuatorQuantityPlacement: '2 وحدات MASH TL-3 عند نقطة بداية التدرج ومحيط منطقة الأمان',
-        hasDetourLightingSensors: true,
-        lightingLuxTarget: '150',
-        lightingTowerSpacing: '30m',
-        lightingAlertChannel: 'central_platform',
-        lightingBackupPower: '15 kVA Silent Automatic Generator',
+        excavationDepth: extractedInfo.dimensions?.trenchDepthM ? extractedInfo.dimensions.trenchDepthM * 100 : (prev.excavationDepth || 0),
+        barrierLateralClearance: extractedInfo.barrierLateralClearance || prev.barrierLateralClearance || 0,
+        steelPlateThickness: prev.steelPlateThickness || 0,
+        bearingWidthLeft: prev.bearingWidthLeft || 0,
+        bearingWidthRight: prev.bearingWidthRight || 0,
+        flushMillingDepth: prev.flushMillingDepth || 0,
+        antiSlipApplied: Boolean(prev.antiSlipApplied),
+        mechanicalAnchoring: Boolean(prev.mechanicalAnchoring),
+        isArterialRoad: Boolean(extractedInfo.isArterialRoad || prev.isArterialRoad),
+        attenuatorType: extractedInfo.attenuatorType || prev.attenuatorType || '',
+        attenuatorQuantityPlacement: extractedInfo.attenuatorQuantityPlacement || prev.attenuatorQuantityPlacement || '',
+        hasDetourLightingSensors: Boolean(extractedInfo.hasDetourLightingSensors || prev.hasDetourLightingSensors),
+        lightingLuxTarget: extractedInfo.lightingLuxTarget || prev.lightingLuxTarget || '',
+        lightingTowerSpacing: extractedInfo.lightingTowerSpacing || prev.lightingTowerSpacing || '',
+        lightingAlertChannel: extractedInfo.lightingAlertChannel || prev.lightingAlertChannel || '',
+        lightingBackupPower: extractedInfo.lightingBackupPower || prev.lightingBackupPower || '',
 
         // Phase 3: Calculator & Traffic Strategy
-        speedLimit: extractedInfo.speedLimit || prev.speedLimit || 80,
-        proposedTaper: extractedInfo.zones?.transition?.lengthM || prev.proposedTaper || 180,
-        proposedBuffer: extractedInfo.zones?.buffer?.lengthM || prev.proposedBuffer || 130,
-        proposedTermination: extractedInfo.zones?.termination?.lengthM || prev.proposedTermination || 30,
-        laneWidth: 3.6,
-        roadClosureAr: extractedInfo.plans?.roadClosureAr || prev.roadClosureAr,
-        roadClosureEn: extractedInfo.plans?.roadClosureEn || prev.roadClosureEn,
-        trafficFlowPlanAr: extractedInfo.plans?.trafficFlowPlanAr || prev.trafficFlowPlanAr,
-        trafficFlowPlanEn: extractedInfo.plans?.trafficFlowPlanEn || prev.trafficFlowPlanEn,
-        tempBridgesAr: extractedInfo.plans?.tempBridgesAr || prev.tempBridgesAr,
-        lightingPlanAr: extractedInfo.plans?.lightingPlanAr || prev.lightingPlanAr,
-        sideStreetsPlanAr: extractedInfo.plans?.sideStreetsPlanAr || prev.sideStreetsPlanAr,
-        pedestrianStart: `محطة 0+050 (${extractedInfo.coordinates || ''})`,
-        pedestrianEnd: `محطة 0+${(extractedInfo.dimensions?.totalDetourLengthM || 290) - 30}`,
-        vehicleStart: `محطة 0+000 (${extractedInfo.coordinates || ''})`,
-        vehicleEnd: `محطة 0+${extractedInfo.dimensions?.totalDetourLengthM || 290}`,
+        speedLimit: extractedInfo.speedLimit || prev.speedLimit || '',
+        proposedTaper: extractedInfo.zones?.transition?.lengthM || prev.proposedTaper || '',
+        proposedBuffer: extractedInfo.zones?.buffer?.lengthM || prev.proposedBuffer || '',
+        proposedTermination: extractedInfo.zones?.termination?.lengthM || prev.proposedTermination || '',
+        laneWidth: extractedInfo.laneWidth || prev.laneWidth || '',
+        roadClosureAr: extractedInfo.plans?.roadClosureAr || prev.roadClosureAr || '',
+        roadClosureEn: extractedInfo.plans?.roadClosureEn || prev.roadClosureEn || '',
+        trafficFlowPlanAr: extractedInfo.plans?.trafficFlowPlanAr || prev.trafficFlowPlanAr || '',
+        trafficFlowPlanEn: extractedInfo.plans?.trafficFlowPlanEn || prev.trafficFlowPlanEn || '',
+        tempBridgesAr: extractedInfo.plans?.tempBridgesAr || prev.tempBridgesAr || '',
+        lightingPlanAr: extractedInfo.plans?.lightingPlanAr || prev.lightingPlanAr || '',
+        sideStreetsPlanAr: extractedInfo.plans?.sideStreetsPlanAr || prev.sideStreetsPlanAr || '',
+        pedestrianStart: extractedInfo.coordinates ? `محطة 0+050 (${extractedInfo.coordinates})` : (prev.pedestrianStart || ''),
+        pedestrianEnd: extractedInfo.dimensions?.totalDetourLengthM ? `محطة 0+${extractedInfo.dimensions.totalDetourLengthM - 30}` : (prev.pedestrianEnd || ''),
+        vehicleStart: extractedInfo.coordinates ? `محطة 0+000 (${extractedInfo.coordinates})` : (prev.vehicleStart || ''),
+        vehicleEnd: extractedInfo.dimensions?.totalDetourLengthM ? `محطة 0+${extractedInfo.dimensions.totalDetourLengthM}` : (prev.vehicleEnd || ''),
         externalPermitDocName: fileName ? `${fileName} (مخطط الأوتوكاد المعتمد)` : prev.externalPermitDocName,
 
         fiveWaysStrategy: extractedInfo.zones ? [
@@ -1158,7 +1150,7 @@ const ConstructionPlanningInterface = () => {
           `3. Buffer Space: ${extractedInfo.zones.buffer?.lengthM || 20}m longitudinal safety buffer strictly kept clear.`,
           `4. Work Area: Excavation length ${extractedInfo.zones.workArea?.lengthM || 60}m (width ${extractedInfo.zones.workArea?.widthM || 4.2}m) protected by solid concrete barriers.`,
           `5. Termination Area: ${extractedInfo.zones.termination?.lengthM || 30}m downstream taper ending with 'END ROAD WORK' signage.`
-        ].join('\n') : prev.fiveWaysStrategy
+        ].join('\n') : (prev.fiveWaysStrategy || '')
       }));
 
       if (extractedInfo.equipmentList && extractedInfo.equipmentList.length > 0) {
@@ -1203,17 +1195,23 @@ const ConstructionPlanningInterface = () => {
   };
 
   const renderFieldHeader = (label, fieldName, isRequired = true) => {
-    const missing = isRequired && isFieldMissing(fieldName);
+    const isMissing = isFieldMissing(fieldName);
     return (
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <label className="block text-xs font-bold text-slate-700 uppercase">
           {label}
         </label>
-        {missing ? (
-          <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs animate-pulse">
-            <span>⚠️</span>
-            <span>{language === 'ar' ? 'مطلوب استكماله' : 'Required'}</span>
-          </span>
+        {isMissing ? (
+          isRequired ? (
+            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs animate-pulse">
+              <span>⚠️</span>
+              <span>{language === 'ar' ? 'مطلوب استكماله' : 'Required'}</span>
+            </span>
+          ) : (
+            <span className="text-[10px] text-slate-400 font-medium px-1.5 py-0.5">
+              <span>{language === 'ar' ? '(اختياري)' : '(Optional)'}</span>
+            </span>
+          )
         ) : (
           <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5">
             <Check className="h-3 w-3" />
@@ -1342,118 +1340,121 @@ const ConstructionPlanningInterface = () => {
   };
 
   const [formData, setFormData] = useState({
-    // Phase 1
-    clientNameAr: 'هيئة تطوير منطقة المدينة المنورة',
-    clientNameEn: 'Project Owning Authority',
-    projectNameAr: 'مشروع تمديد المرافق طريق الملك عبدالعزيز',
-    projectNameEn: 'King Abdulaziz Road Utility Extension',
-    locationAr: 'المدينة المنورة، المملكة العربية السعودية - تقاطع طريق الملك عبدالعزيز مع شارع علي بن أبي طالب',
-    locationEn: 'Madina, Saudi Arabia - Intersection of King Abdulaziz Rd & Ali Bin Abi Talib St',
-    permitStartDate: '2026-08-01', 
-    permitEndDate: '2026-12-31',
-    workStartDate: '2026-08-15',
-    workEndDate: '2026-11-15',
+    // Phase 1: General Project Information
+    clientNameAr: '',
+    clientNameEn: '',
+    projectNameAr: '',
+    projectNameEn: '',
+    locationAr: '',
+    locationEn: '',
+    permitStartDate: '', 
+    permitEndDate: '',
+    workStartDate: '',
+    workEndDate: '',
     detailedTimeline: '', 
-    projectManagerAr: 'م. طارق الحربي',
-    projectManagerEn: 'Eng. Tareq Al-Harbi',
-    projectOwnerAr: 'الجهة المالكة للمشروع',
-    projectOwnerEn: 'Project Owning Authority',
-    contractingCompanyAr: 'شركة مقاولات البنية التحتية بالمدينة',
-    contractingCompanyEn: 'Madina Contracting & Infrastructure Corp',
+    projectManagerAr: '',
+    projectManagerEn: '',
+    projectOwnerAr: '',
+    projectOwnerEn: '',
+    contractingCompanyAr: '',
+    contractingCompanyEn: '',
     consultantNameAr: '',
     consultantNameEn: '',
     roadNameAr: '',
     roadNameEn: '',
     ownerClassification: '', // '' | 'affiliated' | 'not_affiliated'
-    // Phase 2 (Structured dimensions & clearances)
-    constructionType: 'infrastructure', 
-    siteLength: 450, // in meters
-    siteWidth: 80,   // in meters
-    lateralClearance: 25, // in meters (additional clearance standard)
-    longitudinalBuffer: 130, // in meters (corresponds to stopping sight distance for 80 km/h)
-    stagingAreaAr: 'ساحة التشوين الشمالية الغربية بالقرب من الدوار (محطة ٠٢٠+٠)',
-    stagingAreaEn: 'Northwest Staging Yard near Roundabout (Sta 0+020)',
-    hardZoneClassAr: 'منطقة الحفر المفتوح أ (عالية الخطورة)',
-    hardZoneClassEn: 'Zone B Excavation Trench (High Hazard)',
+
+    // Phase 1: Nature of works & Classification
+    constructionType: '', 
+    workPurposeAr: '',
+    workPurposeEn: '',
+    owningUtilityAr: '',
+    owningUtilityEn: '',
+    roadClassification: '', // local | collector | main | commercial | residential
+    trafficVolumeLevel: '', // low | medium | high
+    closedLanesCount: '',
+    totalLanesCount: '',
+    workDurationCategory: '', // long | medium | short | mobile_emergency
+    diversionLengthM: '',
+    pedestrianPathProvided: false,
+    lightingPlanAr: '',
+    lightingPlanEn: '',
+    sideStreetsPlanAr: '',
+    sideStreetsPlanEn: '',
+    photoDocCount: 0,
+    stagingAreaAr: '',
+    stagingAreaEn: '',
+    hardZoneClassAr: '',
+    hardZoneClassEn: '',
     coordinates: '', 
     cadFile: null,
-    // --- Added: PDF-required Step 1 fields not previously captured ---
-    workPurposeAr: '', // الغرض من الحفر / نوع الأعمال
-    workPurposeEn: '',
-    owningUtilityAr: '', // الجهة المالكة للخدمة (e.g. water/electricity/telecom authority)
-    owningUtilityEn: '',
-    roadClassification: 'main', // local | collector | main | commercial | residential
-    trafficVolumeLevel: 'medium', // low | medium | high
-    closedLanesCount: 1,
-    totalLanesCount: 2,
-    workDurationCategory: 'medium', // long | medium | short | mobile_emergency
-    diversionLengthM: 350, // used for the 400m pedestrian-path trigger rule
-    pedestrianPathProvided: false,
-    lightingPlanAr: '', // خطة الإضاءة
-    lightingPlanEn: '',
-    sideStreetsPlanAr: '', // خطة التعامل مع الشوارع الجانبية والمعابر
-    sideStreetsPlanEn: '',
-    photoDocCount: 0, // number of site photos uploaded (for the every-25m rule)
-    // Phase 3
+
+    // Phase 2: Dimensions & Clearances
+    siteLength: '',
+    siteWidth: '',
+    lateralClearance: '',
+    longitudinalBuffer: '',
+    trenchWidth: '',
+    trenchLength: '',
+    excavationDepth: 0,
+    barrierLateralClearance: 0,
+    steelPlateThickness: 0,
+    bearingWidthLeft: 0,
+    bearingWidthRight: 0,
+    flushMillingDepth: 0,
+    antiSlipApplied: false,
+    mechanicalAnchoring: false,
     trenchPlatesType: 'none',
     closureAlternativeRoute: 'no',
     alternativeRoutePlan: '',
     impactAttenuators: false,
     smartLightingSensors: false,
-    roadClosureAr: 'إغلاق جزئي لحارة المرور المتجهة شمالاً بطريق الملك عبدالعزيز، مع إبقاء حارة واحدة مفتوحة بشكل مستمر للحركة وتأمينها بالصبات الخرسانية.',
-    roadClosureEn: 'Partial lane closure on King Abdulaziz Rd northbound. One lane to remain open with continuous active redirection.',
-    trafficFlowPlanAr: 'توجيه حركة الشاحنات الكبيرة خلال ساعات الذروة عبر طريق الأمير عبدالمجيد الدائري، مع وضع لوحات تحذيرية متقدمة على بعد ٥٠٠ متر.',
-    trafficFlowPlanEn: 'Peak traffic hours rerouted via Prince Abdul Majeed Road. Signage to be placed 500m ahead of intersection.',
-    fiveWaysStrategy: '1. Advance Warning: Signs placed at 500m, 300m, and 100m.\n2. Transition Area: 45-degree cone taper over 80 meters.\n3. Buffer Space: 50-meter clear zone with sand barrels.\n4. Work Area: Fenced using concrete barriers with safety netting.\n5. Termination Area: 30-meter taper returning traffic to normal lanes.',
-    tempBridgesAr: 'تركيب صفائح فولاذية مؤقتة فوق الخنادق المفتوحة لتسهيل عبور المشاة بأمان (تم اختبار حمولتها حتى ٤٠ طن).',
-    tempBridgesEn: 'Temporary steel plate bridging over excavation trenches for pedestrian crosswalks (tested for 40-tonne capacity).',
-    lightingPlanAr: 'أبراج إضاءة بارتفاعات كافية توزع على مسافات ٣٠ متراً لتوفير معدل سطوع لا يقل عن ١٥٠ لوكس، مع توجيه الإضاءة بعيداً عن أعين القادمين.',
-    lightingPlanEn: 'Tower lights at 30m intervals supplying 150 lux average across work zone. Glare shields oriented away from oncoming traffic.',
-    // Detour start/end points
-    pedestrianStart: 'Sta 0+050 (E582520, N2703810)',
-    pedestrianEnd: 'Sta 0+355 (E582810, N2703810)',
-    vehicleStart: 'Sta 0+000 (E582500, N2703800)',
-    vehicleEnd: 'Sta 0+450 (E582900, N2703800)',
+
+    // Phase 3: Traffic Strategy & Redirection Plans
+    roadClosureAr: '',
+    roadClosureEn: '',
+    trafficFlowPlanAr: '',
+    trafficFlowPlanEn: '',
+    fiveWaysStrategy: '',
+    tempBridgesAr: '',
+    tempBridgesEn: '',
+    pedestrianStart: '',
+    pedestrianEnd: '',
+    vehicleStart: '',
+    vehicleEnd: '',
+
     // Traffic Safety Calculator states & Cross-Section
-    speedLimit: 80,         // km/h (40, 60, 80, 100, 120)
-    closedLaneWidth: 3.6,    // meters
-    proposedTaper: 180,      // meters
-    proposedBuffer: 130,     // meters (Stopping Sight Distance)
-    proposedTermination: 30, // meters (Min 30m)
-    detourLanesPlacement: 'dual', // 'dual' (Left & Right) | 'right' | 'left'
-    activeLanesCount: 2,     // active lanes to remain open total
-    activeLanesLeftCount: 1, // active detour lanes on the left side
-    activeLanesRightCount: 1,// active detour lanes on the right side
-    laneWidth: 3.6,          // meters per active lane
-    pedestrianPathWidth: 1.5,// meters
-    pedestrianPlacement: 'right', // 'left' | 'right' | 'both'
+    speedLimit: '',
+    closedLaneWidth: '',
+    proposedTaper: '',
+    proposedBuffer: '',
+    proposedTermination: '',
+    detourLanesPlacement: '',
+    activeLanesCount: '',
+    activeLanesLeftCount: '',
+    activeLanesRightCount: '',
+    laneWidth: '',
+    pedestrianPathWidth: '',
+    pedestrianPlacement: '',
+
     // Arterial Road & Crash Protection Fields
-    isArterialRoad: true,
-    attenuatorType: 'mash_tl3',
+    isArterialRoad: false,
+    attenuatorType: '',
     attenuatorTypeCustomAr: '',
     attenuatorTypeCustomEn: '',
-    attenuatorQuantityPlacement: '2 units at transition taper start & buffer boundary',
+    attenuatorQuantityPlacement: '',
+
     // Detour Lighting Sensors & Dedicated Platform Integration Fields
-    hasDetourLightingSensors: true,
-    lightingLuxTarget: '150',
-    lightingTowerSpacing: '30m',
-    lightingAlertChannel: 'central_platform',
-    lightingBackupPower: '15 kVA Silent Automatic Generator',
+    hasDetourLightingSensors: false,
+    lightingLuxTarget: '',
+    lightingTowerSpacing: '',
+    lightingAlertChannel: '',
+    lightingBackupPower: '',
+
     // External Provider Official Permit File Attachment
     externalPermitDocument: null,
     externalPermitDocName: '',
-    externalPermitDocSize: '',
-    // Gap 2: Barrier Selection Engine
-    excavationDepth: 0,              // cm — user input
-    barrierLateralClearance: 0.6,    // meters — proposed lateral clearance
-    // Gap 3: Steel Trench Plate Engineering
-    trenchWidth: 0,                  // meters
-    steelPlateThickness: 30,         // mm (default 30mm)
-    bearingWidthLeft: 40,            // cm (min 40)
-    bearingWidthRight: 40,           // cm (min 40)
-    flushMillingDepth: 30,           // mm — should equal plate thickness
-    antiSlipApplied: false,
-    mechanicalAnchoring: false
+    externalPermitDocSize: ''
   });
 
   // Submitted Permits Database State
@@ -1974,8 +1975,8 @@ const ConstructionPlanningInterface = () => {
     setTimeout(() => {
       setAiStatus('completed');
       
-      let critiqueAr = `🤖 **تحليل الذكاء الاصطناعي لمخطط السلامة المرورية:**\n\n`;
-      let critiqueEn = `🤖 **AI Compliance Analysis Report:**\n\n`;
+      let critiqueAr = `🤖 **تحليل نظام تحكم للذكاء الاصطناعي (Tahcom AI) لمخطط السلامة المرورية:**\n\n`;
+      let critiqueEn = `🤖 **Tahcom AI Compliance Analysis Report:**\n\n`;
       
       if (propTaper >= requiredTaper) {
         critiqueAr += `✅ **طول التدرج (Taper):** المقترح (${propTaper}م) كافٍ ويتجاوز الحد الأدنى المطلوب هندسياً (${requiredTaper.toFixed(1)}م) لسرعة ${V} كم/ساعة.\n`;
@@ -4319,35 +4320,35 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
 
               return (
                 <div className="mb-6 relative">
-                  <div className="bg-red-50 border-2 border-red-500/50 rounded-2xl p-4 shadow-md text-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
+                  <div className="bg-amber-50/90 border-2 border-amber-400 rounded-2xl p-4 shadow-md text-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
                     {/* Top Right (X) Dismiss Button */}
                     <button
                       type="button"
                       onClick={() => setDismissedAlertId(latestPermit.id)}
-                      className="absolute top-2.5 right-2.5 p-1 bg-red-100 hover:bg-red-200 text-red-700 hover:text-red-900 rounded-full transition shadow-sm"
+                      className="absolute top-2.5 right-2.5 p-1 bg-amber-100 hover:bg-amber-200 text-amber-800 hover:text-amber-950 rounded-full transition shadow-sm"
                       title={language === 'ar' ? 'إغلاق التنبيه' : 'Dismiss Alert'}
                     >
                       <X className="w-4 h-4" />
                     </button>
 
                     <div className="flex items-start gap-3 pr-6">
-                      <div className="p-2 bg-red-600 text-white rounded-xl shrink-0 mt-0.5 shadow">
+                      <div className="p-2 bg-amber-500 text-slate-950 rounded-xl shrink-0 mt-0.5 shadow-sm">
                         <AlertTriangle className="w-5 h-5" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-xs text-red-700 uppercase tracking-wide">
+                          <span className="font-extrabold text-xs text-amber-800 uppercase tracking-wide">
                             {language === 'ar' ? `آخر تحديث عاجل — تصريح رقم #${latestPermit.id}` : `Latest Alert — Permit #${latestPermit.id}`}
                           </span>
-                          <span className="bg-red-200 text-red-900 font-mono font-bold text-[10px] px-2 py-0.5 rounded-full">
+                          <span className="bg-amber-200/90 text-amber-950 border border-amber-300 font-mono font-bold text-[10px] px-2.5 py-0.5 rounded-full">
                             {latestPermit.status === 'Rejected' ? (language === 'ar' ? 'مرفوض للتعديل' : 'REJECTED') : (language === 'ar' ? 'توجيه جديد' : 'DIRECTIVE LOGGED')}
                           </span>
                         </div>
                         <h3 className="font-bold text-sm text-slate-900 mt-0.5">
                           {language === 'ar' ? latestPermit.projectNameAr : latestPermit.projectNameEn}
                         </h3>
-                        <p className="text-xs text-red-950 font-sans mt-1.5 bg-white/90 p-3 rounded-xl border border-red-200 leading-relaxed font-semibold shadow-sm">
-                          <span className="font-extrabold text-red-700">{language === 'ar' ? 'توجيه وملاحظات المفتش الأخيرة:' : 'Latest Inspector Directives:'} </span>
+                        <p className="text-xs text-slate-900 font-sans mt-1.5 bg-white p-3 rounded-xl border border-amber-200 leading-relaxed font-medium shadow-sm">
+                          <span className="font-extrabold text-amber-800">{language === 'ar' ? 'توجيه وملاحظات المفتش الأخيرة:' : 'Latest Inspector Directives:'} </span>
                           {latestPermit.inspector_notes || (language === 'ar' ? 'تم رفض الخطة المرفقة لعدم استيفاء مسافات التدرج واللوحات التحذيرية المتقدمة.' : 'Request rejected for non-compliance with MOT guidelines.')}
                         </p>
                       </div>
@@ -4360,7 +4361,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         setCurrentPhase(1);
                         alert(language === 'ar' ? `تم فتح النموذج لتعديل التصريح رقم #${latestPermit.id} وإعادة التقديم` : `Form opened to modify permit #${latestPermit.id} and resubmit`);
                       }}
-                      className="shrink-0 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl shadow-md transition flex items-center justify-center gap-2"
+                      className="shrink-0 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 border border-amber-400"
                     >
                       <Edit3 className="w-4 h-4" />
                       <span>{language === 'ar' ? 'تعديل الخطة وإعادة التقديم' : 'Fix & Resubmit Request'}</span>
@@ -4807,14 +4808,14 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         />
                       </div>
                       <div>
-                        {renderFieldHeader(language === 'ar' ? 'الجهة المالكة للخدمة' : 'Owning Utility / Service Provider', language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', false)}
+                        {renderFieldHeader(language === 'ar' ? 'الجهة المالكة للخدمة' : 'Owning Utility / Service Provider', language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', true)}
                         <input
                           type="text"
                           name={language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn'}
                           value={language === 'ar' ? formData.owningUtilityAr : formData.owningUtilityEn}
                           onChange={handleInputChange}
                           placeholder={language === 'ar' ? 'مثال: شركة المياه الوطنية' : 'e.g., National Water Company'}
-                          className={getFieldInputClass(language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', false)}
+                          className={getFieldInputClass(language === 'ar' ? 'owningUtilityAr' : 'owningUtilityEn', true)}
                         />
                       </div>
 
@@ -4980,7 +4981,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   {expandedPanels.p1_gantt && (
                     <div className="p-5 space-y-4 animate-fade-in">
 
-                      {/* AI-Assisted Phasing Assistant (Gemini 2.5 Flash) */}
+                      {/* AI-Assisted Phasing Assistant (Tahcom AI) */}
                       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm shrink-0">
@@ -4990,13 +4991,13 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             <div className="font-bold text-xs text-slate-800 flex items-center gap-2">
                               <span>{language === 'ar' ? 'مساعد جدولة المراحل الذكي (كود الطرق السعودي ٣٠٥)' : 'AI Phasing & Milestone Generator (Saudi Road Code 305)'}</span>
                               <span className="text-[9.5px] bg-blue-600 text-white font-mono font-bold px-2 py-0.5 rounded-full">
-                                Gemini 2.5 Flash
+                                Tahcom AI
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-0.5">
                               {language === 'ar'
-                                ? 'توليد وتوزيع مراحل التجهيز، الصبات، الحفر، الاختبار والردم، وإعادة السفلتة تلقائياً وفق مدة ومعايير المشروع.'
-                                : 'Auto-distribute sequential milestones (Mobilization, Barriers, Excavation, Testing & Reinstatement) compliant with Saudi Road Code 305.'}
+                                ? 'توليد وتوزيع مراحل التجهيز، الصبات، الحفر، الاختبار والردم، وإعادة السفلتة تلقائياً وفق مدة ومعايير المشروع بواسطة نظام تحكم للذكاء الاصطناعي.'
+                                : 'Auto-distribute sequential milestones (Mobilization, Barriers, Excavation, Testing & Reinstatement) via Tahcom AI compliant with Saudi Road Code 305.'}
                             </p>
                           </div>
                         </div>
@@ -5026,7 +5027,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       {phasingAiSuccess && (
                         <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 text-xs text-emerald-800 flex items-center gap-2 animate-fade-in font-medium">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>{language === 'ar' ? 'تم توليد مراحل التنفيذ بنجاح بواسطة Gemini 2.5 Flash وإدراجها في الجدول الزمني.' : 'Phasing milestones successfully generated via Gemini 2.5 Flash and populated into the schedule.'}</span>
+                          <span>{language === 'ar' ? 'تم توليد مراحل التنفيذ بنجاح بواسطة نظام تحكم للذكاء الاصطناعي (Tahcom AI) وإدراجها في الجدول الزمني.' : 'Phasing milestones successfully generated via Tahcom AI and populated into the schedule.'}</span>
                         </div>
                       )}
 

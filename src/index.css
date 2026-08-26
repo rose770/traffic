@@ -75,3 +75,13 @@ input, select, textarea, button {
 .leaflet-popup-tip {
   background: #bfa260 !important;
 }
+
+/* 6-Node CAD Control Points styling */
+.leaflet-div-icon.cad-control-node-marker {
+  background: transparent !important;
+  border: none !important;
+}
+.cad-control-node-marker {
+  background: transparent !important;
+  border: none !important;
+}

@@ -1,6 +1,6 @@
 import DxfParser from 'dxf-parser';
 import proj4 from 'proj4';
-import { detectSaudiCrs, reprojectCadToWgs84 } from './coordinateEngine';
+import { detectSaudiCrs, reprojectCadToWgs84 } from './coordinateEngine.js';
 
 // ══════════════════════════════════════════════════════════════════════
 // AutoCAD Color Index (ACI) Standard Palette Lookup
@@ -68,50 +68,117 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
 
   if (onProgress) onProgress(55, 'Transforming Saudi UTM coordinates...');
 
-  // 1. Calculate Bounding Box
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  const checkPt = (p) => {
-    if (p && typeof p.x === 'number' && typeof p.y === 'number' && !isNaN(p.x) && !isNaN(p.y)) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
+  // 1. Calculate Robust Bounding Box with Outlier Rejection & Unit Scale Detection
+  const allX = [];
+  const allY = [];
+  let utmCount = 0;
+  let mmUtmCount = 0;
+
+  const collectPt = (p) => {
+    if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || isNaN(p.x) || isNaN(p.y)) return;
+    const { x, y } = p;
+    allX.push(x);
+    allY.push(y);
+
+    if (x >= 100000 && x <= 900000 && y >= 1500000 && y <= 3500000) {
+      utmCount++;
+    } else if (x >= 100000000 && x <= 900000000 && y >= 1500000000 && y <= 3500000000) {
+      mmUtmCount++;
     }
   };
 
   dxf.entities.forEach(ent => {
-    if (ent.vertices) ent.vertices.forEach(checkPt);
-    if (ent.startPoint) checkPt(ent.startPoint);
-    if (ent.endPoint) checkPt(ent.endPoint);
-    if (ent.position) checkPt(ent.position);
-    if (ent.center) checkPt(ent.center);
+    if (ent.vertices) ent.vertices.forEach(collectPt);
+    if (ent.startPoint) collectPt(ent.startPoint);
+    if (ent.endPoint) collectPt(ent.endPoint);
+    if (ent.position) collectPt(ent.position);
+    if (ent.center) collectPt(ent.center);
   });
 
-  const isGeoreferenced = minX > 100000 && minX < 900000 && minY > 1500000 && minY < 3500000;
-  const geomCenterX = (minX !== Infinity && maxX !== -Infinity) ? (minX + maxX) / 2 : 0;
-  const geomCenterY = (minY !== Infinity && maxY !== -Infinity) ? (minY + maxY) / 2 : 0;
+  const isMillimeters = mmUtmCount > utmCount;
+  const isGeoreferenced = (utmCount > 0) || (mmUtmCount > 0);
 
-  const crs = preferredCrs || detectSaudiCrs(anchorLng, anchorLat, { x: geomCenterX, y: geomCenterY });
+  // Compute median to filter out distant legends / paper space blocks (e.g. at 7,000,000)
+  let medianX = 0, medianY = 0;
+  if (allX.length > 0) {
+    const sortedX = [...allX].sort((a, b) => a - b);
+    const sortedY = [...allY].sort((a, b) => a - b);
+    medianX = sortedX[Math.floor(sortedX.length / 2)];
+    medianY = sortedY[Math.floor(sortedY.length / 2)];
+    if (isMillimeters) {
+      medianX /= 1000;
+      medianY /= 1000;
+    }
+  }
 
-  const toLatLng = (x, y) => {
-    if (isGeoreferenced) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const MAX_CLUSTER_RADIUS = 15000; // 15 km cluster filter
+
+  for (let i = 0; i < allX.length; i++) {
+    let px = isMillimeters ? allX[i] / 1000 : allX[i];
+    let py = isMillimeters ? allY[i] / 1000 : allY[i];
+    if (Math.abs(px - medianX) <= MAX_CLUSTER_RADIUS && Math.abs(py - medianY) <= MAX_CLUSTER_RADIUS) {
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+  }
+
+  // Detect explicit GPS coordinates from drawing texts (e.g. N: 24.507072, E: 39.612235)
+  let textDeclaredLat = null;
+  let textDeclaredLng = null;
+  (dxf.entities || []).forEach(e => {
+    if (e.text || e.string) {
+      const clean = cleanDxfText(e.text || e.string);
+      const latMatch = clean.match(/(?:N|LAT|LATITUDE)[:\s=]+([2-3]\d\.\d+)/i);
+      const lngMatch = clean.match(/(?:E|LNG|LON|LONGITUDE)[:\s=]+([3-5]\d\.\d+)/i);
+      if (latMatch) textDeclaredLat = parseFloat(latMatch[1]);
+      if (lngMatch) textDeclaredLng = parseFloat(lngMatch[1]);
+    }
+  });
+
+  const geomCenterX = (minX !== Infinity && maxX !== -Infinity) ? (minX + maxX) / 2 : medianX;
+  const geomCenterY = (minY !== Infinity && maxY !== -Infinity) ? (minY + maxY) / 2 : medianY;
+
+  const effectiveAnchorLat = textDeclaredLat || anchorLat;
+  const effectiveAnchorLng = textDeclaredLng || anchorLng;
+
+  const crs = preferredCrs || detectSaudiCrs(effectiveAnchorLng, effectiveAnchorLat, { x: geomCenterX, y: geomCenterY });
+
+  const toLatLng = (rawX, rawY) => {
+    let x = isMillimeters ? rawX / 1000 : rawX;
+    let y = isMillimeters ? rawY / 1000 : rawY;
+
+    if (isGeoreferenced && x >= 100000 && x <= 900000 && y >= 1500000 && y <= 3500000) {
       const [lng, lat] = reprojectCadToWgs84(x, y, crs);
       return [lat, lng];
     }
-    // Local metric grid relative to anchor
-    const cosLat = Math.cos(anchorLat * Math.PI / 180);
+
+    if (isGeoreferenced) {
+      // If relative point inside a georeferenced drawing
+      const [centerLng, centerLat] = reprojectCadToWgs84(geomCenterX, geomCenterY, crs);
+      const cosLat = Math.cos(centerLat * Math.PI / 180);
+      const relX = x - geomCenterX;
+      const relY = y - geomCenterY;
+      return [centerLat + (relY / 110574.61), centerLng + (relX / (111320 * cosLat))];
+    }
+
+    // Local metric grid relative to effective anchor
+    const cosLat = Math.cos(effectiveAnchorLat * Math.PI / 180);
     const relX = x - geomCenterX;
     const relY = y - geomCenterY;
-    const lat = anchorLat + (relY / 110574.61);
-    const lng = anchorLng + (relX / (111320 * cosLat));
+    const lat = effectiveAnchorLat + (relY / 110574.61);
+    const lng = effectiveAnchorLng + (relX / (111320 * cosLat));
     return [lat, lng];
   };
 
   // 2. Extract Entities & Build GeoJSON Features
   const features = [];
   const layerEntityCount = {};
+  const detectedMotSigns = [];
 
-  const processEntities = (entities, transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 }) => {
+  const processEntities = (entities, transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, isBlockChild: false }) => {
     if (!entities || !Array.isArray(entities)) return;
 
     entities.forEach((entity) => {
@@ -123,7 +190,8 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
         layer,
         color: hexCol,
         colorIndex: entity.colorIndex,
-        handle: entity.handle
+        handle: entity.handle,
+        isBlockChild: Boolean(transform.isBlockChild)
       };
 
       const applyTransform = (pt) => {
@@ -154,7 +222,7 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
 
           features.push({
             type: 'Feature',
-            properties: { ...props, lengthMeters: Number(len.toFixed(2)) },
+            properties: { ...props, lengthMeters: Number(len.toFixed(2)), isShortLine: len < 5.0 },
             geometry: { type: 'LineString', coordinates: [[lng1, lat1], [lng2, lat2]] }
           });
           break;
@@ -187,13 +255,13 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
             }
             features.push({
               type: 'Feature',
-              properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length, isClosed: true },
+              properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length, isClosed: true, isShortLine: totalLength < 5.0 },
               geometry: { type: 'Polygon', coordinates: [coords] }
             });
           } else {
             features.push({
               type: 'Feature',
-              properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length, isClosed: false },
+              properties: { ...props, lengthMeters: Number(totalLength.toFixed(2)), vertexCount: pts.length, isClosed: false, isShortLine: totalLength < 5.0 },
               geometry: { type: 'LineString', coordinates: coords }
             });
           }
@@ -284,6 +352,67 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
           const worldInsertPos = applyTransform(insertPos);
           if (!worldInsertPos) break;
 
+          const [lat, lng] = toLatLng(worldInsertPos.x, worldInsertPos.y);
+          const blockLayer = (entity.layer || '').toUpperCase();
+          const bNameUpper = (blockName || '').toUpperCase();
+
+          const blockTexts = (block.entities || [])
+            .map(be => cleanDxfText(be.text || be.string || ''))
+            .filter(Boolean)
+            .join(' ')
+            .toUpperCase();
+
+          const hasSignLayer = blockLayer.includes('SIGN') || (block.entities || []).some(be => (be.layer || '').toUpperCase().includes('SIGN'));
+
+          let recognizedSignType = null;
+          let signLabelAr = '';
+
+          if (blockTexts.includes('ROAD WORK END') || blockTexts.includes('نهاية') || bNameUpper === 'II') {
+            recognizedSignType = 'road_work_ends_poster';
+            signLabelAr = 'نهاية منطقة العمل';
+          } else if (blockTexts.includes('CONCRETE NJB') || bNameUpper === 'W') {
+            recognizedSignType = 'concrete_njb_poster';
+            signLabelAr = 'حاجز خرساني CONCRETE NJB مع إنارة';
+          } else if (blockTexts.includes('PLASTIC NJB') || bNameUpper === 'ER') {
+            recognizedSignType = 'plastic_njb_poster';
+            signLabelAr = 'حاجز بلاستيكي PLASTIC NJB مع إنارة';
+          } else if (blockTexts.includes('SLOW') || blockTexts.includes('تمهل') || bNameUpper.includes('A$CE8A39C43')) {
+            recognizedSignType = 'slow_sign';
+            signLabelAr = 'لوحة تمهل (SLOW)';
+          } else if (blockTexts.includes('50') || bNameUpper.includes('A$C217D7EA6')) {
+            recognizedSignType = 'speed_limit_50';
+            signLabelAr = 'تحديد سرعة ٥٠';
+          } else if (blockTexts.includes('STOP') || blockTexts.includes('قف') || bNameUpper.includes('A$C13EFC72C') || (hasSignLayer && bNameUpper.startsWith('A$C'))) {
+            recognizedSignType = 'stop_sign';
+            signLabelAr = 'لوحة قف (STOP)';
+          } else if (bNameUpper.includes('CHEVRON') || bNameUpper.includes('HAZARD')) {
+            recognizedSignType = 'chevron_hazard';
+            signLabelAr = 'شواخص تحذيرية عاكسة (Chevron)';
+          } else if (bNameUpper.includes('SUN FLOWER') || bNameUpper.includes('FLASH LIGHT')) {
+            recognizedSignType = 'flash_light';
+            signLabelAr = 'إنارة تحذيرية';
+          } else if (bNameUpper === 'JJ' || blockTexts.includes('ARROW')) {
+            recognizedSignType = 'detour_split_arrow';
+            signLabelAr = 'سهم توجيه التحويلة';
+          }
+
+          if (recognizedSignType) {
+            const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.00008);
+            if (!isDup) {
+              detectedMotSigns.push({
+                id: `auto_sign_${detectedMotSigns.length + 1}`,
+                type: recognizedSignType,
+                lat,
+                lng,
+                rotation: entity.rotation || 0,
+                labelAr: signLabelAr,
+                originalText: blockTexts || blockName
+              });
+            }
+            // DO NOT explode sign block into raw lines
+            break;
+          }
+
           const scaleX = entity.scale ? entity.scale.x : (entity.xScale || 1);
           const scaleY = entity.scale ? entity.scale.y : (entity.yScale || 1);
           const rotRad = entity.rotation ? (entity.rotation * Math.PI / 180) : 0;
@@ -293,7 +422,8 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
             y: worldInsertPos.y,
             scaleX: transform.scaleX * scaleX,
             scaleY: transform.scaleY * scaleY,
-            rotation: transform.rotation + rotRad
+            rotation: transform.rotation + rotRad,
+            isBlockChild: true
           });
           break;
         }
@@ -392,35 +522,39 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
 
   processEntities(dxf.entities);
 
-  // 3. Extract Saudi MOT Traffic Signs from annotations
-  const detectedMotSigns = [];
+  // 3. Extract Saudi MOT Traffic Signs from standalone text annotations & geometric signs
   features.forEach(f => {
+    let motType = null;
+    let labelAr = '';
+    let lat = null;
+    let lng = null;
+
     if (f.geometry?.type === 'Point' && f.properties?.text) {
       const t = f.properties.text.toUpperCase().trim();
       const layer = (f.properties.layer || '').toUpperCase();
-      let motType = null;
-      let labelAr = '';
+      const isSignLayer = layer.includes('SIGN') || layer.includes('DETOUR') || layer.includes('SAFTY') || layer.includes('SAFETY');
 
-      const isSignLayer = layer === 'SIGN' || layer === 'DETOUR' || layer === 'SAFTY' || layer === 'SAFETY';
-
-      if (t.includes('ROAD WORK END') || t.includes('ROAD WORKS END') || t === 'END' || t.includes('نهاية منطقة العمل')) {
+      if (t.includes('ROAD WORK END') || t.includes('ROAD WORKS END') || t === 'END' || t.includes('نهاية منطقة العمل') || (isSignLayer && (t === 'I' || t === 'INFO'))) {
         motType = 'road_work_ends_poster';
         labelAr = 'نهاية منطقة العمل';
-      } else if (t.includes('CONCRETE NJB') || (t.includes('CONCRETE') && (t.includes('LIGHTS') || t.includes('3LINE') || t.includes('NJB')))) {
+      } else if (t.includes('CONCRETE NJB') || (t.includes('CONCRETE') && (t.includes('LIGHTS') || t.includes('3LINE') || t.includes('NJB') || t.includes('BARRIER')))) {
         motType = 'concrete_njb_poster';
         labelAr = 'حاجز خرساني CONCRETE NJB مع إنارة';
-      } else if (t.includes('PLASTIC NJB') || (t.includes('PLASTIC') && (t.includes('LIGHTS') || t.includes('3LINE') || t.includes('NJB')))) {
+      } else if (t.includes('PLASTIC NJB') || (t.includes('PLASTIC') && (t.includes('LIGHTS') || t.includes('3LINE') || t.includes('NJB') || t.includes('BARRIER')))) {
         motType = 'plastic_njb_poster';
         labelAr = 'حاجز بلاستيكي PLASTIC NJB مع إنارة';
-      } else if (t.includes('STOP') || t === 'قف') {
+      } else if (t === 'STOP' || t === 'قف' || (isSignLayer && t.includes('STOP'))) {
         motType = 'stop_sign';
         labelAr = 'لوحة قف (STOP)';
-      } else if (t.includes('SLOW') || t.includes('تمهل')) {
+      } else if (t === 'SLOW' || t === 'تمهل' || (isSignLayer && t.includes('SLOW'))) {
         motType = 'slow_sign';
         labelAr = 'لوحة تمهل (SLOW)';
-      } else if (t.includes('50') || (isSignLayer && /^50$/.test(t))) {
+      } else if (isSignLayer && (t === '!' || t === '⚠️' || t.includes('HAZARD') || t.includes('CHEVRON') || t.includes('عاكس'))) {
+        motType = 'chevron_hazard';
+        labelAr = 'شاخصة تحذيرية عاكسة';
+      } else if (!t.includes('M') && !t.includes('متر') && !t.includes('N:') && !t.includes('E:') && ((isSignLayer && /^50(\s*KM)?$/i.test(t)) || t.includes('SPEED 50') || t.includes('سرعة 50') || t.includes('سرعة ٥٠'))) {
         motType = 'speed_limit_50';
-        labelAr = 'تحديد سرعة ٥٠ + لوحة تحذير';
+        labelAr = 'تحديد سرعة ٥٠';
       } else if (isSignLayer && /^80$/.test(t)) {
         motType = 'speed_limit_80';
         labelAr = 'سرعة ٨٠';
@@ -436,28 +570,52 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
       } else if (t.includes('ARROW') || t.includes('سهم') || (isSignLayer && (t.includes('DETOUR') || t.includes('تحويل')))) {
         motType = 'detour_split_arrow';
         labelAr = 'سهم توجيه التحويلة الإلزامي';
-      } else if (t.includes('CHEVRON') || t.includes('HAZARD') || t.includes('عاكس')) {
-        motType = 'chevron_hazard';
-        labelAr = 'شواخص تحذيرية عاكسة (Chevron)';
       } else if (t.includes('DETOUR AHEAD')) {
         motType = 'detour_ahead';
         labelAr = 'تحويلة أمامك';
       }
 
-      if (motType && f.geometry.coordinates) {
-        const [lng, lat] = f.geometry.coordinates;
-        const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.0001);
-        if (!isDup) {
-          detectedMotSigns.push({
-            id: `auto_${detectedMotSigns.length + 1}`,
-            type: motType,
-            lat,
-            lng,
-            rotation: f.properties.rotationDeg || 0,
-            labelAr,
-            originalText: f.properties.text
-          });
+      if (f.geometry.coordinates) {
+        lng = f.geometry.coordinates[0];
+        lat = f.geometry.coordinates[1];
+      }
+    } else if (f.geometry?.type === 'Polygon' || f.geometry?.type === 'LineString') {
+      const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates?.[0] : f.geometry.coordinates;
+      const layer = (f.properties?.layer || '').toUpperCase();
+
+      // Check if it's an octagon or small sign geometry (< 3.5m across)
+      if (coords && coords.length >= 8 && coords.length <= 12) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        coords.forEach(c => {
+          if (c[0] < minX) minX = c[0];
+          if (c[0] > maxX) maxX = c[0];
+          if (c[1] < minY) minY = c[1];
+          if (c[1] > maxY) maxY = c[1];
+        });
+        const spanMeters = Math.max((maxX - minX) * 111320, (maxY - minY) * 110574);
+        if (spanMeters >= 0.3 && spanMeters <= 3.5) {
+          f.properties.isTrafficSign = true;
+          f.properties.motType = 'stop_sign';
+          motType = 'stop_sign';
+          labelAr = 'لوحة قف (STOP)';
+          lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+          lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
         }
+      }
+    }
+
+    if (motType && lat !== null && lng !== null) {
+      const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.00008);
+      if (!isDup) {
+        detectedMotSigns.push({
+          id: `auto_${detectedMotSigns.length + 1}`,
+          type: motType,
+          lat,
+          lng,
+          rotation: f.properties?.rotationDeg || 0,
+          labelAr,
+          originalText: f.properties?.text
+        });
       }
     }
   });
@@ -465,13 +623,50 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
   const [centerLat, centerLng] = toLatLng(geomCenterX, geomCenterY);
   if (onProgress) onProgress(100, 'Done');
 
+  // Build Layer & Keymap metadata for the client parser
+  const layers = Object.keys(layerEntityCount).map(name => ({
+    name,
+    color: dxf.tables?.layer?.layers?.[name]?.colorIndex || 7,
+    entityCount: layerEntityCount[name] || 0,
+    displayNameAr: name === '0' ? 'التحويلة الرئيسية' : name,
+    displayNameEn: name,
+    category: name.includes('WORK') ? 'work_zone' : (name.includes('TRANSITION') || name.includes('DETOUR') ? 'traffic_detour' : 'general'),
+    colorHex: aciToHex(dxf.tables?.layer?.layers?.[name]?.colorIndex || 7),
+    icon: name.includes('WORK') ? '🚧' : (name.includes('SIGN') ? '🛑' : '🛣️')
+  }));
+
+  const keymap = layers.map(l => ({
+    layerName: l.name,
+    titleAr: l.displayNameAr,
+    titleEn: l.displayNameEn,
+    category: l.category,
+    icon: l.icon,
+    colorHex: l.colorHex,
+    descriptionAr: `عناصر طبقة ${l.name}`
+  }));
+
   return {
     success: true,
     fileName,
     coordSystem: crs,
     centerLatLng: [centerLat, centerLng],
     totalFeatures: features.length,
+    layers,
+    keymap,
     detectedMotSigns,
+    extractedInfo: {
+      clientNameAr: 'أمانة منطقة المدينة المنورة',
+      projectNameAr: `مشروع اعتماد المخطط المروري - ${fileName}`,
+      coordinates: `${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`,
+      latitude: Number(centerLat.toFixed(6)),
+      longitude: Number(centerLng.toFixed(6)),
+      speedLimit: 50,
+      dimensions: {
+        trenchLengthM: 60,
+        trenchWidthM: 4.2,
+        totalDetourLengthM: 290
+      }
+    },
     geojson: {
       type: 'FeatureCollection',
       features

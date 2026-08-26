@@ -817,8 +817,11 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
       return { ar: 'عنصر مخطط هندسي تنفيذي', en: 'Engineering Plan Geometry', color: aciToHex(colorCode) || '#00FFFF' };
     };
 
+    // Extracted Saudi MOT signs
+    const detectedMotSigns = [];
+
     // Recursive entity processor to handle blocks (INSERT) with full hierarchy & rotation
-    const processEntities = (entities, transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 }, depth = 0) => {
+    const processEntities = (entities, transform = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, isBlockChild: false }, depth = 0) => {
       if (depth > 6) return;
       (entities || []).forEach((entity, idx) => {
         try {
@@ -829,7 +832,7 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
         } else if (entity.color !== undefined && entity.color !== 256 && entity.color !== 0) {
           colorIdx = entity.color;
         } else if (layerInfo && layerInfo.color !== undefined && layerInfo.color !== 0) {
-          colorIdx = Math.abs(layerInfo.color); // negative color in DXF means layer is turned off, but color index is abs(val)
+          colorIdx = Math.abs(layerInfo.color);
         }
 
         const hexCol = aciToHex(colorIdx);
@@ -843,6 +846,7 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
           roleAr: roleInfo.ar,
           roleEn: roleInfo.en,
           depth,
+          isBlockChild: Boolean(transform.isBlockChild),
           id: `${depth}_${idx}`
         };
 
@@ -1127,6 +1131,66 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
             const worldInsertPos = applyTransform(insertPos);
             if (!isPtValid(worldInsertPos)) break;
 
+            const [lat, lng] = toLatLng(worldInsertPos.x, worldInsertPos.y);
+            const blockLayer = (entity.layer || '').toUpperCase();
+            const bNameUpper = (blockName || '').toUpperCase();
+
+            const blockTexts = (block.entities || [])
+              .map(be => cleanDxfText(be.text || be.string || ''))
+              .filter(Boolean)
+              .join(' ')
+              .toUpperCase();
+
+            const hasSignLayer = blockLayer.includes('SIGN') || (block.entities || []).some(be => (be.layer || '').toUpperCase().includes('SIGN'));
+
+            let recognizedSignType = null;
+            let signLabelAr = '';
+
+            if (blockTexts.includes('ROAD WORK END') || blockTexts.includes('نهاية') || bNameUpper === 'II') {
+              recognizedSignType = 'road_work_ends_poster';
+              signLabelAr = 'نهاية منطقة العمل';
+            } else if (blockTexts.includes('CONCRETE NJB') || bNameUpper === 'W') {
+              recognizedSignType = 'concrete_njb_poster';
+              signLabelAr = 'حاجز خرساني CONCRETE NJB مع إنارة';
+            } else if (blockTexts.includes('PLASTIC NJB') || bNameUpper === 'ER') {
+              recognizedSignType = 'plastic_njb_poster';
+              signLabelAr = 'حاجز بلاستيكي PLASTIC NJB مع إنارة';
+            } else if (blockTexts.includes('SLOW') || blockTexts.includes('تمهل') || bNameUpper.includes('A$CE8A39C43')) {
+              recognizedSignType = 'slow_sign';
+              signLabelAr = 'لوحة تمهل (SLOW)';
+            } else if (blockTexts.includes('50') || bNameUpper.includes('A$C217D7EA6')) {
+              recognizedSignType = 'speed_limit_50';
+              signLabelAr = 'تحديد سرعة ٥٠';
+            } else if (blockTexts.includes('STOP') || blockTexts.includes('قف') || bNameUpper.includes('A$C13EFC72C') || (hasSignLayer && bNameUpper.startsWith('A$C'))) {
+              recognizedSignType = 'stop_sign';
+              signLabelAr = 'لوحة قف (STOP)';
+            } else if (bNameUpper.includes('CHEVRON') || bNameUpper.includes('HAZARD')) {
+              recognizedSignType = 'chevron_hazard';
+              signLabelAr = 'شواخص تحذيرية عاكسة (Chevron)';
+            } else if (bNameUpper.includes('SUN FLOWER') || bNameUpper.includes('FLASH LIGHT')) {
+              recognizedSignType = 'flash_light';
+              signLabelAr = 'إنارة تحذيرية';
+            } else if (bNameUpper === 'JJ' || blockTexts.includes('ARROW')) {
+              recognizedSignType = 'detour_split_arrow';
+              signLabelAr = 'سهم توجيه التحويلة';
+            }
+
+            if (recognizedSignType) {
+              const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.00008);
+              if (!isDup) {
+                detectedMotSigns.push({
+                  id: `auto_sign_${detectedMotSigns.length + 1}`,
+                  type: recognizedSignType,
+                  lat,
+                  lng,
+                  rotation: entity.rotation || 0,
+                  labelAr: signLabelAr,
+                  originalText: blockTexts || blockName
+                });
+              }
+              break;
+            }
+
             const scaleX = entity.scale ? entity.scale.x : (entity.xScale || 1);
             const scaleY = entity.scale ? entity.scale.y : (entity.yScale || 1);
             const rotRad = entity.rotation ? (entity.rotation * Math.PI / 180) : 0;
@@ -1136,7 +1200,8 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
               y: worldInsertPos.y,
               scaleX: transform.scaleX * scaleX,
               scaleY: transform.scaleY * scaleY,
-              rotation: transform.rotation + rotRad
+              rotation: transform.rotation + rotRad,
+              isBlockChild: true
             };
 
             processEntities(block.entities, combinedTransform, depth + 1);
@@ -1693,16 +1758,16 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
       features
     };
 
-    // Extract intelligent Saudi MOT signs from CAD text annotations & stations
-    const detectedMotSigns = [];
+    // Extract additional Saudi MOT signs from CAD text annotations & geometric signs
     features.forEach(f => {
+      let motType = null;
+      let labelAr = '';
+      let lat = null;
+      let lng = null;
+
       if (f.geometry?.type === 'Point' && f.properties?.text) {
         const t = f.properties.text.toUpperCase().trim();
         const layer = (f.properties.layer || '').toUpperCase();
-        let motType = null;
-        let labelAr = '';
-
-        // Only process text on sign-related layers OR standalone sign text
         const isSignLayer = layer === 'SIGN' || layer === 'DETOUR' || layer === 'SAFTY' || layer === 'SAFETY';
 
         if (t.includes('ROAD WORK END') || t.includes('ROAD WORKS END') || t === 'END' || t.includes('نهاية أعمال') || t.includes('نهاية منطقة العمل')) {
@@ -1746,20 +1811,54 @@ app.post('/api/parse-dwg', upload.single('dwgFile'), async (req, res) => {
           labelAr = 'تحويلة أمامك';
         }
 
-        if (motType && f.geometry.coordinates) {
-          const [lng, lat] = f.geometry.coordinates;
-          const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.0001);
-          if (!isDup) {
-            detectedMotSigns.push({
-              id: `auto_${detectedMotSigns.length + 1}`,
-              type: motType,
-              lat,
-              lng,
-              rotation: f.properties.rotationDeg || 0,
-              labelAr,
-              originalText: f.properties.text
-            });
+        if (f.geometry.coordinates) {
+          lng = f.geometry.coordinates[0];
+          lat = f.geometry.coordinates[1];
+        }
+      } else if (f.geometry?.type === 'Polygon' || f.geometry?.type === 'LineString') {
+        const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates?.[0] : f.geometry.coordinates;
+        const layer = (f.properties?.layer || '').toUpperCase();
+
+        if (coords && coords.length >= 8 && coords.length <= 12) {
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          coords.forEach(c => {
+            if (c[0] < minX) minX = c[0];
+            if (c[0] > maxX) maxX = c[0];
+            if (c[1] < minY) minY = c[1];
+            if (c[1] > maxY) maxY = c[1];
+          });
+          const spanMeters = Math.max((maxX - minX) * 111320, (maxY - minY) * 110574);
+          if (spanMeters >= 0.3 && spanMeters <= 3.5) {
+            f.properties.isTrafficSign = true;
+            f.properties.motType = 'stop_sign';
+            motType = 'stop_sign';
+            labelAr = 'لوحة قف (STOP)';
+            lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+            lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
           }
+        } else if (layer.includes('SIGN') || layer.includes('STOP') || layer.includes('TRAFFIC')) {
+          f.properties.isTrafficSign = true;
+          if (coords && coords.length >= 2) {
+            motType = 'stop_sign';
+            labelAr = 'لوحة قف (STOP)';
+            lng = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
+            lat = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
+          }
+        }
+      }
+
+      if (motType && lat !== null && lng !== null) {
+        const isDup = detectedMotSigns.some(s => Math.hypot(s.lat - lat, s.lng - lng) < 0.00008);
+        if (!isDup) {
+          detectedMotSigns.push({
+            id: `auto_${detectedMotSigns.length + 1}`,
+            type: motType,
+            lat,
+            lng,
+            rotation: f.properties?.rotationDeg || 0,
+            labelAr,
+            originalText: f.properties?.text
+          });
         }
       }
     });
