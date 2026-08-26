@@ -1108,7 +1108,7 @@ const ConstructionPlanningInterface = () => {
         hardZoneClassEn: extractedInfo.hardZoneClassEn || prev.hardZoneClassEn || '',
 
         // Phase 2: Barrier & Trench Plate Engineering
-        excavationDepth: extractedInfo.dimensions?.trenchDepthM ? extractedInfo.dimensions.trenchDepthM * 100 : (prev.excavationDepth || 0),
+        excavationDepth: extractedInfo.dimensions?.trenchDepthM || (prev.excavationDepth || 0),
         barrierLateralClearance: extractedInfo.barrierLateralClearance || prev.barrierLateralClearance || 0,
         steelPlateThickness: prev.steelPlateThickness || 0,
         bearingWidthLeft: prev.bearingWidthLeft || 0,
@@ -1900,19 +1900,19 @@ const ConstructionPlanningInterface = () => {
     const durationHours = Math.max(0, (end - start) / (1000 * 60 * 60));
     const depth = parseFloat(formData.excavationDepth) || 0;
 
-    if (durationHours > 72 || depth > 60) {
+    if (durationHours > 72 || depth > 0.6) {
       return {
         type: 'concrete', clearanceMin: 0.6, clearanceMax: 1.0,
         labelAr: 'حواجز خرسانية', labelEn: 'Concrete Safety Barriers',
-        reasonAr: depth > 60 ? 'عمق الحفر يتجاوز ٦٠ سم' : 'مدة العمل تتجاوز ٧٢ ساعة',
-        reasonEn: depth > 60 ? 'Excavation depth exceeds 60cm' : 'Work duration exceeds 72 hours'
+        reasonAr: depth > 0.6 ? 'عمق الحفر يتجاوز ٠.٦ م' : 'مدة العمل تتجاوز ٧٢ ساعة',
+        reasonEn: depth > 0.6 ? 'Excavation depth exceeds 0.6m' : 'Work duration exceeds 72 hours'
       };
-    } else if (durationHours > 8 && depth <= 30) {
+    } else if (durationHours > 8 && depth <= 0.3) {
       return {
         type: 'plastic', clearanceMin: 2.5, clearanceMax: 2.5,
         labelAr: 'حواجز بلاستيكية مملوءة بالماء/الرمل', labelEn: 'Water/Sand-Filled Plastic Barriers',
-        reasonAr: 'مدة العمل بين ٨ إلى ٧٢ ساعة وعمق الحفر ≤ ٣٠ سم',
-        reasonEn: 'Work duration 8–72 hours and depth ≤ 30cm'
+        reasonAr: 'مدة العمل بين ٨ إلى ٧٢ ساعة وعمق الحفر ≤ ٠.٣ م',
+        reasonEn: 'Work duration 8–72 hours and depth ≤ 0.3m'
       };
     } else {
       return {
@@ -3172,6 +3172,8 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     const placement = activeData.detourLanesPlacement || 'dual';
     const latClearance = parseFloat(activeData.lateralClearance) || 2.5;
     const trenchW = parseFloat(activeData.trenchWidth) || 4.2;
+    const depthM = parseFloat(activeData.excavationDepth) || 0;
+    const trenchDepthPx = depthM > 0 ? Math.max(35, Math.min(75, depthM * 32)) : 52;
 
     const activeLanesTotal = parseInt(activeData.activeLanesCount) || 2;
     const leftLanesCount = placement === 'right' ? 0
@@ -3327,9 +3329,9 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
         {/* Right Buffer Clearance */}
         <rect x={wzStart + trenchPixelW} y={roadY - 6} width={clearanceW} height="6" fill="url(#cs-buffer-hatch-large)" />
 
-        {/* Excavation Trench Pit */}
+        {/* Excavation Trench Pit (Dynamic Depth) */}
         <polygon
-          points={`${wzStart},${roadY} ${wzStart + 20},${roadY + 52} ${wzStart + trenchPixelW - 20},${roadY + 52} ${wzStart + trenchPixelW},${roadY}`}
+          points={`${wzStart},${roadY} ${wzStart + 20},${roadY + trenchDepthPx} ${wzStart + trenchPixelW - 20},${roadY + trenchDepthPx} ${wzStart + trenchPixelW},${roadY}`}
           fill="#140f0c"
           stroke="#ef4444"
           strokeWidth="2.5"
@@ -3337,6 +3339,28 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
         />
         {/* Steel Trench Bridge Plate */}
         <rect x={trenchCX - 45} y={roadY - 5} width="90" height="6.5" rx="1.5" fill="#64748b" stroke="#cbd5e1" strokeWidth="1.5" />
+
+        {/* Depth Dimension Indicator Line & Label */}
+        {depthM > 0 && (
+          <g>
+            <line
+              x1={wzStart + trenchPixelW + 10} y1={roadY}
+              x2={wzStart + trenchPixelW + 10} y2={roadY + trenchDepthPx}
+              stroke="#ef4444" strokeWidth="1.8" strokeDasharray="3 2"
+              markerStart="url(#cs-gold-arr-s)" markerEnd="url(#cs-gold-arr-e)"
+            />
+            <text
+              x={wzStart + trenchPixelW + 16}
+              y={roadY + trenchDepthPx / 2 + 4}
+              fill="#ef4444"
+              fontSize="11"
+              fontWeight="800"
+              textAnchor="start"
+            >
+              {isAr ? `العمق: ${depthM}م` : `Depth: ${depthM}m`}
+            </text>
+          </g>
+        )}
 
         {/* Excavator Machine Graphic (Enlarged) */}
         <path
@@ -3350,8 +3374,10 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
         <rect x={trenchCX - 28} y={roadY - 26} width="12" height="12" rx="1.5" fill="#fef9c3" opacity="0.8" />
 
         {/* Work Zone Bottom Label */}
-        <text x={trenchCX} y={roadY + 76} fill="#ef4444" fontSize="13" fontWeight="800" textAnchor="middle">
-          {isAr ? `منطقة العمل وحفر الخندق (${trenchW}م)` : `Work & Trench Zone (${trenchW}m)`}
+        <text x={trenchCX} y={roadY + Math.max(76, trenchDepthPx + 24)} fill="#ef4444" fontSize="13" fontWeight="800" textAnchor="middle">
+          {isAr
+            ? `منطقة العمل وحفر الخندق (${trenchW}م عرض${depthM > 0 ? ` • ${depthM}م عمق` : ''})`
+            : `Work & Trench Zone (${trenchW}m W${depthM > 0 ? ` • ${depthM}m D` : ''})`}
         </text>
 
         {/* ══ RIGHT NJ BARRIER ══ */}
@@ -5304,8 +5330,8 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                               </span>
                               <span className="text-[11px] text-slate-600 font-mono block mt-0.5">
                                 {language === 'ar'
-                                  ? `عرض الشارع: ${formData.siteWidth || 35}م • عرض الحفر: ${formData.trenchWidth || 4.2}م • الحارات المقترحة: ${formData.activeLanesCount || 2} (${formData.detourLanesPlacement === 'dual' ? 'يمين ويسار' : formData.detourLanesPlacement === 'left' ? 'يسار' : 'يمين'})`
-                                  : `Corridor Width: ${formData.siteWidth || 35}m • Trench: ${formData.trenchWidth || 4.2}m • Active Lanes: ${formData.activeLanesCount || 2} (${formData.detourLanesPlacement || 'dual'})`}
+                                  ? `عرض الشارع: ${formData.siteWidth || 35}م • عرض الحفر: ${formData.trenchWidth || 4.2}م • عمق الحفر: ${formData.excavationDepth ? `${formData.excavationDepth}م` : '١.٥م'} • الحارات: ${formData.activeLanesCount || 2}`
+                                  : `Corridor Width: ${formData.siteWidth || 35}m • Trench: ${formData.trenchWidth || 4.2}m • Depth: ${formData.excavationDepth ? `${formData.excavationDepth}m` : '1.5m'} • Lanes: ${formData.activeLanesCount || 2}`}
                               </span>
                             </div>
                           </div>
@@ -5527,8 +5553,22 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             type="number" 
                             step="0.1" 
                             name="trenchWidth" 
-                            value={formData.trenchWidth || 4.2} 
+                            value={formData.trenchWidth || ''} 
                             onChange={handleInputChange} 
+                            placeholder="4.2"
+                            className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-600 font-bold uppercase mb-1">{language === 'ar' ? 'عمق خندق الحفر (متر)' : 'Hole / Trench Depth (m)'}</label>
+                          <input 
+                            type="number" 
+                            step="0.1" 
+                            name="excavationDepth" 
+                            value={formData.excavationDepth || ''} 
+                            onChange={handleInputChange} 
+                            placeholder="1.5"
                             className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
                           />
                         </div>
@@ -5539,8 +5579,9 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             type="number" 
                             step="0.5" 
                             name="siteWidth" 
-                            value={formData.siteWidth || 35} 
+                            value={formData.siteWidth || ''} 
                             onChange={handleInputChange} 
+                            placeholder="35"
                             className="w-full bg-white border border-slate-300 rounded p-2 focus:ring-brand-primary font-mono" 
                           />
                         </div>
@@ -5552,12 +5593,15 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                             <span>{language === 'ar' ? 'المخطط الهندسي للمقطع العرضي (2D Cross-Section Preview)' : '2D Engineering Cross-Section Preview'}</span>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono flex-wrap">
                             <span className="bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-700 text-amber-300">
                               {language === 'ar' ? `الحارات: ${formData.activeLanesCount || 2}` : `Lanes: ${formData.activeLanesCount || 2}`}
                             </span>
                             <span className="bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-700 text-emerald-300">
-                              {language === 'ar' ? `الخندق: ${formData.trenchWidth || 4.2}م` : `Trench: ${formData.trenchWidth || 4.2}m`}
+                              {language === 'ar' ? `عرض الخندق: ${formData.trenchWidth || 4.2}م` : `Trench: ${formData.trenchWidth || 4.2}m`}
+                            </span>
+                            <span className="bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-700 text-rose-300">
+                              {language === 'ar' ? `عمق الحفر: ${formData.excavationDepth ? `${formData.excavationDepth}م` : '١.٥م'}` : `Depth: ${formData.excavationDepth ? `${formData.excavationDepth}m` : '1.5m'}`}
                             </span>
                           </div>
                         </div>
@@ -5838,14 +5882,15 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                               <span className="text-[10px] text-slate-400 block mt-1">({language === 'ar' ? barrierReq.reasonAr : barrierReq.reasonEn})</span>
                             </div>
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">{language === 'ar' ? 'عمق الحفر (سم)' : 'Excavation Depth (cm)'}</label>
+                              <label className="block text-[10px] font-bold text-slate-400 uppercase">{language === 'ar' ? 'عمق الحفر (متر)' : 'Excavation Depth (m)'}</label>
                               <input 
                                 type="number" 
+                                step="0.1"
                                 name="excavationDepth" 
                                 value={formData.excavationDepth} 
                                 onChange={handleInputChange} 
                                 className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white font-mono" 
-                                placeholder="0"
+                                placeholder="1.5"
                               />
                             </div>
                           </div>
