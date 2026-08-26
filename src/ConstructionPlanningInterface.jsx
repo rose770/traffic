@@ -3744,30 +3744,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               >
                 <Printer className="h-4 w-4" /> {t.print}
               </button>
-              <button 
-                onClick={() => window.print()} 
-                className="flex items-center gap-2 px-5 py-2 text-white bg-emerald-600 hover:bg-emerald-700 font-semibold rounded-lg shadow transition text-xs"
-              >
-                <Shield className="h-4 w-4" /> {language === 'ar' ? 'تحميل شهادة إشعار مرور (PDF)' : 'Download Muroor Certificate'}
-              </button>
-              <button 
-                onClick={() => setActiveReportModal('end')} 
-                className="flex items-center gap-2 px-5 py-2 text-brand-text-dark bg-slate-100 hover:bg-slate-200 font-semibold rounded-lg border border-slate-350 transition text-xs"
-              >
-                <FileText className="h-4 w-4" /> {language === 'ar' ? 'تقرير انتهاء التحويلة' : 'Detour End Report'}
-              </button>
-              <button 
-                onClick={() => setActiveReportModal('removal')} 
-                className="flex items-center gap-2 px-5 py-2 text-brand-text-dark bg-slate-100 hover:bg-slate-200 font-semibold rounded-lg border border-slate-350 transition text-xs"
-              >
-                <FileText className="h-4 w-4" /> {language === 'ar' ? 'تقرير إزالة التحويلة' : 'Detour Removal Report'}
-              </button>
-              <button 
-                onClick={() => setSubmitted(false)}
-                className="flex items-center gap-2 px-5 py-2 bg-brand-primary hover:bg-brand-primary-hover text-white font-semibold rounded-lg transition text-xs"
-              >
-                <RotateCcw className="h-4 w-4" /> {t.edit}
-              </button>
             </div>
           </div>
 
