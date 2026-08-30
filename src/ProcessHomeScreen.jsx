@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { X, BookOpen, CheckSquare, ArrowRight, Shield, FileText, Wrench, Activity, Trash2, ChevronDown, ChevronUp, Building2, Globe } from 'lucide-react';
-import PreApprovalChecklist from './PreApprovalChecklist';
+import { X, BookOpen, ArrowRight, Shield, FileText, FileSignature, ShieldCheck, ClipboardCheck, FileCheck, Wrench, Activity, Trash2, Building2, Globe } from 'lucide-react';
 import TrafficReferenceGuide from './TrafficReferenceGuide';
 
 // The 5 official stages, straight from the source requirements document
@@ -91,11 +90,11 @@ const STAGES = [
   }
 ];
 
-const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, calcs, pendingCount = 0, myPermits = [], onContinue }) => {
+const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, calcs, pendingCount = 0, myPermits = [], onContinue, getDocumentAvailability, onOpenDocument }) => {
   const isArabic = language === 'ar';
   const [guideOpen, setGuideOpen] = useState(false);
-  const [checklistOpen, setChecklistOpen] = useState(false);
-  const [expandedStageId, setExpandedStageId] = useState(null);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
 
   // Step 1 (Prepare & Submit) is explicitly the contractor's job in the
   // source document — an inspector never performs it, so it's hidden
@@ -103,9 +102,6 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
   // are the reviewing authority's job — a contractor has nothing to click
   // into there, so only Step 1 is shown for that role.
   const visibleStages = STAGES.filter(s => s.id !== 1);
-  const activeStage = STAGES.find(s => s.id === expandedStageId);
-
-  const toggleStage = (id) => setExpandedStageId(prev => (prev === id ? null : id));
 
   // Contractor-facing status summary — since they only see Step 1's card,
   // this is how they know where their submissions actually stand in the
@@ -138,7 +134,7 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
           <p className="text-brand-light/70 mt-2 text-sm max-w-2xl">
             {userRole === 'inspector'
               ? (isArabic ? 'اضغط على أي مرحلة لعرض تفاصيلها والانتقال إليها مباشرة.' : 'Click any stage to see its details and jump straight to it.')
-              : (isArabic ? 'يمكنك مراجعة سجل طلباتك أو الاطلاع على الدليل والقائمة قبل تقديم طلب جديد.' : 'Review your request history, or check the guide and checklist before submitting a new request.')}
+              : (isArabic ? 'يمكنك مراجعة سجل طلباتك ومستنداتك أو الاطلاع على الدليل الفني قبل تقديم طلب جديد.' : 'Review your requests and documents, or check the guide before submitting a new request.')}
           </p>
         </div>
 
@@ -148,12 +144,11 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
           <div className={`grid grid-cols-1 ${visibleStages.length >= 4 ? 'sm:grid-cols-2' : ''} ${visibleStages.length === 5 ? 'lg:grid-cols-5' : visibleStages.length === 4 ? 'lg:grid-cols-4' : 'max-w-xs mx-auto'} gap-4`}>
             {visibleStages.map((stage) => {
               const Icon = stage.icon;
-              const isOpen = expandedStageId === stage.id;
               return (
                 <button
                   key={stage.id}
-                  onClick={() => toggleStage(stage.id)}
-                  className={`text-left bg-white border rounded-xl p-4 space-y-2 relative transition shadow-sm ${isOpen ? 'border-brand-gold ring-1 ring-brand-gold' : 'border-slate-200 hover:border-brand-primary/40'}`}
+                  onClick={() => onContinue(stage.inspectorTab, stage.zoneFilter)}
+                  className="text-left bg-white border border-slate-200 hover:border-brand-primary/40 hover:shadow-md rounded-xl p-4 space-y-2 relative transition shadow-sm"
                 >
                   <div className="flex items-center justify-between">
                     <span className="w-7 h-7 rounded-full bg-brand-gold/15 text-brand-gold-hover font-extrabold text-xs flex items-center justify-center">
@@ -173,165 +168,15 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
                   <p className="text-[11px] text-brand-primary border-t border-slate-100 pt-2 font-semibold">
                     {isArabic ? stage.outputAr : stage.outputEn}
                   </p>
-                  <div className="flex justify-center pt-1">
-                    {isOpen ? <ChevronUp className="w-4 h-4 text-brand-gold-hover" /> : <ChevronDown className="w-4 h-4 text-slate-300" />}
-                  </div>
                 </button>
               );
             })}
           </div>
 
-          {/* سجل طلبات الترخيص للمقاول — kept here on the Home Screen so the
-              contractor can see all their submissions and status without
-              needing the Steps 2-5 cards they can't act on anyway. */}
-          {userRole !== 'inspector' && myPermits.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-                <h2 className="font-extrabold text-brand-text-dark text-sm">
-                  {isArabic ? 'سجل طلبات الترخيص والتوجيهات' : 'Permit Requests & Directives Log'}
-                </h2>
-                <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                  {myPermits.length} {isArabic ? 'طلبات' : 'permits'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
-                  <span className="block text-xl font-extrabold text-amber-700">{pendingReview}</span>
-                  <span className="text-[10px] font-bold text-amber-800">{isArabic ? 'قيد المراجعة' : 'Under Review'}</span>
-                </div>
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
-                  <span className="block text-xl font-extrabold text-emerald-700">{approvedCount}</span>
-                  <span className="text-[10px] font-bold text-emerald-800">{isArabic ? 'معتمدة' : 'Approved'}</span>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
-                  <span className="block text-xl font-extrabold text-red-700">{rejectedCount}</span>
-                  <span className="text-[10px] font-bold text-red-800">{isArabic ? 'مرفوضة للتعديل' : 'Rejected'}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {myPermits.map(permit => (
-                  <div key={permit.id} className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="font-bold text-xs text-slate-900 truncate block">{isArabic ? permit.projectNameAr : permit.projectNameEn}</span>
-                        <span className="text-[10px] font-mono text-slate-500">#{permit.id}</span>
-                      </div>
-                      <span className={`shrink-0 px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                        permit.status === 'Approved' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                        permit.status === 'Rejected' ? 'bg-red-100 text-red-800 border border-red-300' :
-                        permit.status === 'Resolved' ? 'bg-slate-200 text-slate-700 border border-slate-300' :
-                        'bg-amber-100 text-amber-800 border border-amber-300'
-                      }`}>
-                        {permit.status === 'Approved' ? (isArabic ? 'معتمد ونشط' : 'Approved') :
-                         permit.status === 'Rejected' ? (isArabic ? 'مرفوض للتعديل' : 'Rejected') :
-                         permit.status === 'Resolved' ? (isArabic ? 'مغلق' : 'Closed') :
-                         (isArabic ? 'قيد المراجعة الفنية' : 'Under Review')}
-                      </span>
-                    </div>
-                    {permit.inspector_notes && (
-                      <p className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded p-2">{permit.inspector_notes}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-
-          {activeStage && (
-            <div className="bg-brand-light border border-brand-gold/30 rounded-xl p-6 space-y-5">
-              <h3 className="font-extrabold text-base flex items-center gap-2 text-brand-text-dark">
-                <span className="w-6 h-6 rounded-full bg-brand-gold text-white font-extrabold text-xs flex items-center justify-center">
-                  {activeStage.id}
-                </span>
-                {isArabic ? activeStage.titleAr : activeStage.titleEn}
-              </h3>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {(isArabic ? activeStage.pipelineAr : activeStage.pipelineEn).map((step, idx, arr) => (
-                  <React.Fragment key={idx}>
-                    <span className="px-3 py-1.5 bg-white border border-slate-200 rounded-full text-[11px] font-semibold text-brand-text-dark shadow-sm">
-                      {step}
-                    </span>
-                    {idx < arr.length - 1 && <ArrowRight className={`w-3.5 h-3.5 text-brand-primary/50 ${isArabic ? 'rotate-180' : ''}`} />}
-                  </React.Fragment>
-                ))}
-              </div>
-
-              {activeStage.checklistAr && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(isArabic ? activeStage.checklistAr : activeStage.checklistEn).map((item, idx) => (
-                    <div key={idx} className="bg-white border border-slate-200 rounded-lg p-2.5 text-[11px] text-brand-text-gray shadow-sm">
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {activeStage.actionType === 'submit' && (
-                <button
-                  onClick={() => onContinue()}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-sm rounded-lg shadow transition"
-                >
-                  <span>{isArabic ? 'الانتقال إلى تقديم الطلب' : 'Go to Submission'}</span>
-                  <ArrowRight className={`w-4 h-4 ${isArabic ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-
-              {activeStage.actionType === 'review' && (
-                <div className="space-y-2">
-                  {userRole === 'inspector' && (
-                    <p className="text-xs text-brand-text-gray">
-                      {isArabic ? `لديك حالياً ${pendingCount} طلباً بانتظار المراجعة والقرار.` : `You currently have ${pendingCount} request(s) awaiting review & decision.`}
-                    </p>
-                  )}
-                  <button
-                    onClick={() => onContinue(activeStage.inspectorTab, activeStage.zoneFilter)}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-sm rounded-lg shadow transition"
-                  >
-                    <span>{isArabic ? 'الانتقال إلى المراجعة والقرار' : 'Go to Pending Review'}</span>
-                    <ArrowRight className={`w-4 h-4 ${isArabic ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
-              )}
-
-              {activeStage.actionType === 'readiness' && (
-                <button
-                  onClick={() => onContinue(activeStage.inspectorTab, activeStage.zoneFilter)}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-sm rounded-lg shadow transition"
-                >
-                  <span>{isArabic ? 'الانتقال إلى التحويلات المعتمدة النشطة' : 'Go to Active Approved Work Zones'}</span>
-                  <ArrowRight className={`w-4 h-4 ${isArabic ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-
-              {activeStage.actionType === 'monitor' && (
-                <button
-                  onClick={() => onContinue(activeStage.inspectorTab, activeStage.zoneFilter)}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-sm rounded-lg shadow transition"
-                >
-                  <span>{isArabic ? 'الانتقال لمتابعة التقارير الدورية' : 'Go to Periodic Monitoring'}</span>
-                  <ArrowRight className={`w-4 h-4 ${isArabic ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-
-              {activeStage.actionType === 'closure' && (
-                <button
-                  onClick={() => onContinue(activeStage.inspectorTab, activeStage.zoneFilter)}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-sm rounded-lg shadow transition"
-                >
-                  <span>{isArabic ? 'الانتقال إلى إغلاق التحويلة' : 'Go to Detour Closure'}</span>
-                  <ArrowRight className={`w-4 h-4 ${isArabic ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-            </div>
-          )}
             </>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={`grid grid-cols-1 ${userRole !== 'inspector' ? 'sm:grid-cols-3' : ''} gap-4`}>
             <button
               onClick={() => setGuideOpen(true)}
               className="flex items-center gap-3 bg-white hover:bg-brand-light border border-brand-gold/30 rounded-xl p-5 text-left transition shadow-sm"
@@ -345,18 +190,41 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
               </div>
             </button>
 
-            <button
-              onClick={() => setChecklistOpen(true)}
-              className="flex items-center gap-3 bg-white hover:bg-brand-light border border-brand-primary/30 rounded-xl p-5 text-left transition shadow-sm"
-            >
-              <CheckSquare className="w-8 h-8 text-brand-primary shrink-0" />
-              <div>
-                <h4 className="font-bold text-sm text-brand-text-dark">{isArabic ? '✅ قائمة التحقق' : '✅ Checklist'}</h4>
-                <p className="text-[11px] text-brand-text-gray">
-                  {isArabic ? 'معاينة قائمة التحقق المسبق الفنية (١٧ عنصراً) قبل التقديم' : 'Preview the 17-item pre-approval technical checklist before you submit'}
-                </p>
-              </div>
-            </button>
+            {userRole !== 'inspector' && (
+              <button
+                onClick={() => setRequestsOpen(true)}
+                className="flex items-center gap-3 bg-white hover:bg-brand-light border border-brand-primary/30 rounded-xl p-5 text-left transition shadow-sm relative"
+              >
+                <FileText className="w-8 h-8 text-brand-primary shrink-0" />
+                <div>
+                  <h4 className="font-bold text-sm text-brand-text-dark">{isArabic ? '📋 سجل طلباتي' : '📋 My Requests'}</h4>
+                  <p className="text-[11px] text-brand-text-gray">
+                    {isArabic ? 'سجل طلبات الترخيص وحالتها وتوجيهات المفتش' : 'Your permit requests, status & inspector directives'}
+                  </p>
+                </div>
+                {myPermits.some(p => p.status === 'Rejected' || (p.inspector_notes && p.inspector_notes.trim().length > 0)) && (
+                  <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                  </span>
+                )}
+              </button>
+            )}
+
+            {userRole !== 'inspector' && (
+              <button
+                onClick={() => setDocumentsOpen(true)}
+                className="flex items-center gap-3 bg-white hover:bg-brand-light border border-brand-primary/30 rounded-xl p-5 text-left transition shadow-sm"
+              >
+                <FileSignature className="w-8 h-8 text-brand-primary shrink-0" />
+                <div>
+                  <h4 className="font-bold text-sm text-brand-text-dark">{isArabic ? '📄 المستندات' : '📄 Documents'}</h4>
+                  <p className="text-[11px] text-brand-text-gray">
+                    {isArabic ? 'المستندات الرسمية الصادرة لجميع طلباتك' : 'Official documents issued for all your requests'}
+                  </p>
+                </div>
+              </button>
+            )}
           </div>
 
           <div className="flex justify-center pt-2">
@@ -394,29 +262,161 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
         </div>
       )}
 
-      {checklistOpen && (
+      {requestsOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center p-5 border-b border-slate-200 sticky top-0 bg-white z-10">
               <h3 className="text-brand-text-dark font-extrabold text-sm flex items-center gap-2">
-                <CheckSquare className="w-5 h-5 text-brand-primary" />
-                {isArabic ? 'قائمة التحقق المسبق الفنية (١٧ عنصراً)' : 'Pre-Approval Technical Checklist (17 Items)'}
+                <FileText className="w-5 h-5 text-brand-primary" />
+                {isArabic ? 'سجل طلبات الترخيص والتوجيهات' : 'Permit Requests & Directives Log'}
               </h3>
-              <button onClick={() => setChecklistOpen(false)} className="p-1.5 bg-slate-100 hover:bg-red-500 hover:text-white rounded-full transition">
+              <button onClick={() => setRequestsOpen(false)} className="p-1.5 bg-slate-100 hover:bg-red-500 hover:text-white rounded-full transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-5 space-y-3">
-              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800">
-                {isArabic
-                  ? 'هذه معاينة ذاتية فقط. المطابقة الفنية الملزمة تتم من قبل جهة المراجعة أثناء الخطوة ٢: مراجعة واعتماد التحويلة.'
-                  : 'This is a self-preview only. The binding technical compliance check is performed by the reviewing authority during Step 2: Review & Approve.'}
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-end">
+                <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
+                  {myPermits.length} {isArabic ? 'طلبات' : 'permits'}
+                </span>
               </div>
-              <PreApprovalChecklist language={language} formData={formData} calcs={calcs} readOnly={userRole === 'contractor'} />
+
+              {myPermits.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200 text-slate-500 text-xs">
+                  {isArabic ? 'لا يوجد طلبات ترخيص مقدمة حالياً.' : 'No permit requests submitted yet.'}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                      <span className="block text-xl font-extrabold text-amber-700">{pendingReview}</span>
+                      <span className="text-[10px] font-bold text-amber-800">{isArabic ? 'قيد المراجعة' : 'Under Review'}</span>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                      <span className="block text-xl font-extrabold text-emerald-700">{approvedCount}</span>
+                      <span className="text-[10px] font-bold text-emerald-800">{isArabic ? 'معتمدة' : 'Approved'}</span>
+                    </div>
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                      <span className="block text-xl font-extrabold text-red-700">{rejectedCount}</span>
+                      <span className="text-[10px] font-bold text-red-800">{isArabic ? 'مرفوضة للتعديل' : 'Rejected'}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                    {myPermits.map(permit => (
+                      <div key={permit.id} className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="font-bold text-xs text-slate-900 truncate block">{isArabic ? permit.projectNameAr : permit.projectNameEn}</span>
+                            <span className="text-[10px] font-mono text-slate-500">#{permit.id}</span>
+                          </div>
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                            permit.status === 'Approved' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                            permit.status === 'Rejected' ? 'bg-red-100 text-red-800 border border-red-300' :
+                            permit.status === 'Resolved' ? 'bg-slate-200 text-slate-700 border border-slate-300' :
+                            'bg-amber-100 text-amber-800 border border-amber-300'
+                          }`}>
+                            {permit.status === 'Approved' ? (isArabic ? 'معتمد ونشط' : 'Approved') :
+                             permit.status === 'Rejected' ? (isArabic ? 'مرفوض للتعديل' : 'Rejected') :
+                             permit.status === 'Resolved' ? (isArabic ? 'مغلق' : 'Closed') :
+                             (isArabic ? 'قيد المراجعة الفنية' : 'Under Review')}
+                          </span>
+                        </div>
+                        {permit.inspector_notes && (
+                          <p className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded p-2">{permit.inspector_notes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      {documentsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-5 border-b border-slate-200 sticky top-0 bg-white z-10">
+              <h3 className="text-brand-text-dark font-extrabold text-sm flex items-center gap-2">
+                <FileSignature className="w-5 h-5 text-brand-primary" />
+                {isArabic ? 'المستندات الرسمية لجميع الطلبات' : 'Official Documents — All Requests'}
+              </h3>
+              <button onClick={() => setDocumentsOpen(false)} className="p-1.5 bg-slate-100 hover:bg-red-500 hover:text-white rounded-full transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-end">
+                <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
+                  {getDocumentAvailability ? myPermits.filter(p => getDocumentAvailability(p).any).length : 0} {isArabic ? 'طلبات' : 'permits'}
+                </span>
+              </div>
+
+              {!getDocumentAvailability || myPermits.filter(p => getDocumentAvailability(p).any).length === 0 ? (
+                <div className="text-center py-8 text-xs text-brand-text-gray space-y-2">
+                  <FileSignature className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p>{isArabic ? 'لا توجد مستندات مكتملة بعد — ستظهر هنا فور اعتماد أو تقديم أي محضر.' : 'No completed documents yet — they’ll appear here once any document is submitted.'}</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                  {myPermits.filter(p => getDocumentAvailability(p).any).map(permit => {
+                    const docs = getDocumentAvailability(permit);
+                    return (
+                      <div key={permit.id} className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50">
+                        <div>
+                          <span className="font-mono text-slate-400 text-[10px] font-bold">#{permit.id}</span>
+                          <h4 className="font-extrabold text-slate-900 text-xs">{isArabic ? permit.projectNameAr : permit.projectNameEn}</h4>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {docs.openingMinutes && (
+                            <button
+                              onClick={() => onOpenDocument && onOpenDocument('opening', permit)}
+                              className="py-1.5 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold-hover font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-brand-gold/20 transition"
+                            >
+                              <FileSignature className="w-3.5 h-3.5" />
+                              <span>{isArabic ? 'محضر فتح تحويلة' : 'Opening Minutes'}</span>
+                            </button>
+                          )}
+                          {docs.readinessReport && (
+                            <button
+                              onClick={() => onOpenDocument && onOpenDocument('readiness', permit)}
+                              className="py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-emerald-500/20 transition"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>{isArabic ? 'محضر الجاهزية' : 'Readiness Report'}</span>
+                            </button>
+                          )}
+                          {docs.monitoringReport && (
+                            <button
+                              onClick={() => onOpenDocument && onOpenDocument('monitoring', permit)}
+                              className="py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-amber-500/20 transition"
+                            >
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              <span>{isArabic ? 'متابعة الأداء' : 'Monitoring Report'}</span>
+                            </button>
+                          )}
+                          {docs.closureMinutes && (
+                            <button
+                              onClick={() => onOpenDocument && onOpenDocument('closure', permit)}
+                              className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-slate-300 transition"
+                            >
+                              <FileCheck className="w-3.5 h-3.5" />
+                              <span>{isArabic ? 'محضر إغلاق التحويلة' : 'Closure Minutes'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

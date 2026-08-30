@@ -1666,6 +1666,9 @@ const ConstructionPlanningInterface = () => {
   const inspectorMarkersGroupRef = React.useRef(null);
   const [inspectReportModalOpen, setInspectReportModalOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState('inbox'); // 'inbox' | 'active_approved'
+  // Collapses the left-hand requests list on the Inbox / External Review
+  // tabs so the detail panel can take up (almost) the full width.
+  const [listPanelOpen, setListPanelOpen] = useState(true);
   // Sequential status filter within Active Zones: readiness -> monitoring -> closure
   const [activeZoneFilter, setActiveZoneFilter] = useState('readiness');
   const [activeZoneViewMode, setActiveZoneViewMode] = useState('detailed'); // 'detailed' | 'compact'
@@ -3712,20 +3715,62 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
   // Show the 5-stage process overview once per login, before the wizard/console.
   if (showHomeScreen) {
     return (
-      <ProcessHomeScreen
-        language={language}
-        onToggleLanguage={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
-        userRole={activePortalMode}
-        formData={formData}
-        calcs={calcs}
-        pendingCount={submittedPermits.filter(p => p.status !== 'Approved' && p.status !== 'Rejected' && p.status !== 'Resolved').length}
-        myPermits={submittedPermits}
-        onContinue={(targetTab, targetZoneFilter) => {
-          if (targetTab && activePortalMode === 'inspector') setInspectorTab(targetTab);
-          if (targetZoneFilter) setActiveZoneFilter(targetZoneFilter);
-          setShowHomeScreen(false);
-        }}
-      />
+      <>
+        <ProcessHomeScreen
+          language={language}
+          onToggleLanguage={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
+          userRole={activePortalMode}
+          formData={formData}
+          calcs={calcs}
+          pendingCount={submittedPermits.filter(p => p.status !== 'Approved' && p.status !== 'Rejected' && p.status !== 'Resolved').length}
+          myPermits={submittedPermits}
+          getDocumentAvailability={getDocumentAvailability}
+          onOpenDocument={(type, permit) => {
+            if (type === 'opening') { setSelectedPermitForOpening(permit); setOpeningMinutesModalOpen(true); }
+            else if (type === 'readiness') { setSelectedPermitForReadiness(permit); setFieldReadinessModalOpen(true); }
+            else if (type === 'monitoring') { setSelectedPermitForActiveAudit(permit); setActiveMonitoringModalOpen(true); }
+            else if (type === 'closure') { setSelectedPermitForClosure(permit); setClosureModalOpen(true); }
+          }}
+          onContinue={(targetTab, targetZoneFilter) => {
+            if (targetTab && activePortalMode === 'inspector') setInspectorTab(targetTab);
+            if (targetZoneFilter) setActiveZoneFilter(targetZoneFilter);
+            setShowHomeScreen(false);
+          }}
+        />
+
+        {/* Document modals rendered here too so "My Requests & Documents"
+            on the Home Screen can open them directly, without needing to
+            leave for the Prepare & Submit Request screen. */}
+        <PeriodicMonitoringForm
+          isOpen={activeMonitoringModalOpen}
+          onClose={() => { setActiveMonitoringModalOpen(false); setSelectedPermitForActiveAudit(null); }}
+          permit={selectedPermitForActiveAudit}
+          language={language}
+          onSave={handleSavePeriodicAudit}
+        />
+        <ClosureMinutesForm
+          isOpen={closureModalOpen}
+          onClose={() => { setClosureModalOpen(false); setSelectedPermitForClosure(null); }}
+          permit={selectedPermitForClosure}
+          language={language}
+          onSave={handleSaveClosureMinutes}
+        />
+        <FieldReadinessModal
+          isOpen={fieldReadinessModalOpen}
+          onClose={() => { setFieldReadinessModalOpen(false); setSelectedPermitForReadiness(null); }}
+          permit={selectedPermitForReadiness}
+          language={language}
+          onCompleteReadiness={handleSaveFieldReadiness}
+        />
+        <DetourOpeningMinutesForm
+          isOpen={openingMinutesModalOpen}
+          onClose={() => { setOpeningMinutesModalOpen(false); setSelectedPermitForOpening(null); }}
+          permit={selectedPermitForOpening}
+          language={language}
+          onApprove={handleApproveFromOpeningMinutes}
+          onSave={handleSaveOpeningMinutes}
+        />
+      </>
     );
   }
 
@@ -4263,52 +4308,12 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
         {activePortalMode === 'contractor' && (
           <div className="p-8">
             
-            {/* Contractor Portal View Switcher Bar */}
-            <div className="flex flex-col sm:flex-row border-b border-slate-200 mb-6 bg-slate-100 p-1.5 rounded-2xl gap-2 shadow-inner">
-              <button
-                type="button"
-                onClick={() => setContractorTab('new_plan')}
-                className={`flex-1 py-2.5 px-4 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-2 ${
-                  contractorTab === 'new_plan'
-                    ? 'bg-brand-primary text-white shadow-md'
-                    : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-                <span>{language === 'ar' ? 'إنشاء وتقديم خطة تحويلة جديدة' : 'Create & Submit Detour Plan'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setContractorTab('my_requests')}
-                className={`flex-1 py-2.5 px-4 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-2 relative ${
-                  contractorTab === 'my_requests'
-                    ? 'bg-brand-primary text-white shadow-md'
-                    : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                <span>{language === 'ar' ? 'سجل طلباتي والمعاملات الحالية' : 'My Requests & Directives Log'}</span>
-                {submittedPermits.some(p => p.status === 'Rejected' || (p.inspector_notes && p.inspector_notes.trim().length > 0)) && (
-                  <span className="flex h-2.5 w-2.5 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setContractorTab('documents')}
-                className={`flex-1 py-2.5 px-4 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-2 ${
-                  contractorTab === 'documents'
-                    ? 'bg-brand-primary text-white shadow-md'
-                    : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
-                }`}
-              >
-                <FileSignature className="w-4 h-4" />
-                <span>{language === 'ar' ? 'المستندات' : 'Documents'}</span>
-              </button>
+            {/* Contractor Portal Header \u2014 "My Requests & Directives Log" and
+                "Documents" now live on the Home Screen, so this screen is
+                solely for preparing & submitting a detour plan. */}
+            <div className="flex items-center gap-2 mb-6 bg-slate-100 p-4 rounded-2xl shadow-inner">
+              <Plus className="w-4 h-4 text-brand-primary" />
+              <span className="font-extrabold text-xs text-slate-700">{language === 'ar' ? 'إنشاء وتقديم خطة تحويلة جديدة' : 'Create & Submit Detour Plan'}</span>
             </div>
 
             {/* High-Priority Inspector Rejection & Directives Alert Box (LATEST SINGLE UPDATE ONLY) */}
@@ -4373,205 +4378,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               );
             })()}
 
-            {contractorTab === 'my_requests' ? (
-              /* Contractor Requests & Directives Dashboard */
-              <div className="space-y-6 animate-fade-in">
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                  <div className="flex items-center justify-between pb-4 border-b border-slate-200 mb-6">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-brand-primary" />
-                      <h2 className="font-extrabold text-slate-900 text-base">
-                        {language === 'ar' ? 'سجل طلبات الترخيص والتوجيهات' : 'Contractor Permits & Directives Log'}
-                      </h2>
-                    </div>
-                    <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                      {submittedPermits.length} {language === 'ar' ? 'طلبات' : 'permits'}
-                    </span>
-                  </div>
-
-                  {submittedPermits.length === 0 ? (
-                    <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200 text-slate-500 text-xs">
-                      {language === 'ar' ? 'لا يوجد طلبات ترخيص مقدمة حالياً.' : 'No permit requests submitted yet.'}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {submittedPermits.map(permit => (
-                        <div key={permit.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white transition shadow-sm space-y-3">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-sm text-slate-900">{language === 'ar' ? permit.projectNameAr : permit.projectNameEn}</span>
-                                <span className="text-xs font-mono text-slate-500 font-bold">#{permit.id}</span>
-                              </div>
-                              <span className="text-xs text-slate-500">{language === 'ar' ? permit.contractorAr : permit.contractorEn}</span>
-                            </div>
-
-                            <span className={`px-3 py-1 rounded-full font-bold text-xs ${
-                              permit.status === 'Approved' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                              permit.status === 'Rejected' ? 'bg-red-100 text-red-800 border border-red-300' :
-                              permit.status === 'Resolved' ? 'bg-slate-200 text-slate-700 border border-slate-300' :
-                              permit.status === 'PendingExternalReview' ? 'bg-purple-100 text-purple-800 border border-purple-300' :
-                              'bg-amber-100 text-amber-800 border border-amber-300'
-                            }`}>
-                              {permit.status === 'Approved' ? (language === 'ar' ? 'معتمد ونشط' : 'Approved') :
-                               permit.status === 'Rejected' ? (language === 'ar' ? 'مرفوض للتعديل' : 'Rejected') :
-                               permit.status === 'Resolved' ? (language === 'ar' ? 'مغلق' : 'Closed') :
-                               permit.status === 'PendingExternalReview' ? (language === 'ar' ? 'بانتظار مراجعة الجهة الأخرى' : 'Pending External Entity Review') :
-                               (language === 'ar' ? 'قيد المراجعة الفنية' : 'Under Review')}
-                            </span>
-                          </div>
-
-                          {/* Details Grid */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-                            <div className="bg-white p-2 rounded border border-slate-200">
-                              <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.speedLimit}</span>
-                              <span className="font-bold text-slate-800">{permit.speed || 80} km/h</span>
-                            </div>
-                            <div className="bg-white p-2 rounded border border-slate-200">
-                              <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.taperLength}</span>
-                              <span className="font-bold text-slate-800">{permit.taper || 180} m</span>
-                            </div>
-                            <div className="bg-white p-2 rounded border border-slate-200">
-                              <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.bufferSSD}</span>
-                              <span className="font-bold text-slate-800">{permit.buffer || 130} m</span>
-                            </div>
-                            <div className="bg-white p-2 rounded border border-slate-200">
-                              <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.terminationLength}</span>
-                              <span className="font-bold text-slate-800">{permit.termination || 30} m</span>
-                            </div>
-                          </div>
-
-                          {/* Inspector Directives Log inside Card */}
-                          {permit.inspector_notes && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs">
-                              <span className="font-bold text-red-800 block mb-0.5">{language === 'ar' ? 'ملاحظات وتوجيهات المفتش:' : 'Inspector Directives:'}</span>
-                              <p className="text-red-950 font-medium">{permit.inspector_notes}</p>
-                            </div>
-                          )}
-
-                          {/* Official documents \u2014 the contractor can view and export
-                              these once they exist, but the approval/decision actions
-                              inside each one remain inspector-only. */}
-                          <div className="pt-2 border-t border-slate-200">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">
-                              {language === 'ar' ? 'المستندات الرسمية' : 'Official Documents'}
-                            </p>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                              <button
-                                onClick={() => { setSelectedPermitForOpening(permit); setOpeningMinutesModalOpen(true); }}
-                                className="py-1.5 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold-hover font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-brand-gold/20 transition"
-                              >
-                                <FileSignature className="w-3.5 h-3.5" />
-                                <span>{language === 'ar' ? 'محضر فتح تحويلة' : 'Opening Minutes'}</span>
-                              </button>
-                              <button
-                                onClick={() => { setSelectedPermitForReadiness(permit); setFieldReadinessModalOpen(true); }}
-                                className="py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-emerald-500/20 transition"
-                              >
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                                <span>{language === 'ar' ? 'محضر الجاهزية' : 'Readiness Report'}</span>
-                              </button>
-                              <button
-                                onClick={() => { setSelectedPermitForActiveAudit(permit); setActiveMonitoringModalOpen(true); }}
-                                className="py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-amber-500/20 transition"
-                              >
-                                <ClipboardCheck className="w-3.5 h-3.5" />
-                                <span>{language === 'ar' ? 'متابعة الأداء' : 'Monitoring Report'}</span>
-                              </button>
-                              <button
-                                onClick={() => { setSelectedPermitForClosure(permit); setClosureModalOpen(true); }}
-                                className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-slate-300 transition"
-                              >
-                                <FileCheck className="w-3.5 h-3.5" />
-                                <span>{language === 'ar' ? 'محضر إغلاق التحويلة' : 'Closure Minutes'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : contractorTab === 'documents' ? (
-              /* Contractor Documents Tab \u2014 all their permits' official
-                 documents, consolidated in one place. */
-              <div className="space-y-6 animate-fade-in">
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                  <div className="flex items-center justify-between pb-4 border-b border-slate-200 mb-6">
-                    <div className="flex items-center gap-2">
-                      <FileSignature className="w-5 h-5 text-brand-primary" />
-                      <h2 className="font-extrabold text-slate-900 text-base">
-                        {language === 'ar' ? 'المستندات الرسمية لجميع الطلبات' : 'Official Documents \u2014 All Requests'}
-                      </h2>
-                    </div>
-                    <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                      {submittedPermits.filter(p => getDocumentAvailability(p).any).length} {language === 'ar' ? 'طلبات' : 'permits'}
-                    </span>
-                  </div>
-
-                  {submittedPermits.filter(p => getDocumentAvailability(p).any).length === 0 ? (
-                    <div className="text-center py-12 text-xs text-slate-400 space-y-2">
-                      <FileSignature className="w-8 h-8 text-slate-300 mx-auto" />
-                      <p>{language === 'ar' ? 'لا توجد مستندات مكتملة بعد \u2014 ستظهر هنا فور اعتماد أو تقديم أي محضر.' : 'No completed documents yet \u2014 they\u2019ll appear here once any document is submitted.'}</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {submittedPermits.filter(p => getDocumentAvailability(p).any).map(permit => {
-                        const docs = getDocumentAvailability(permit);
-                        return (
-                        <div key={permit.id} className="border border-slate-200 rounded-xl p-4 space-y-3">
-                          <div>
-                            <span className="font-mono text-slate-400 text-[10px] font-bold">{permit.id}</span>
-                            <h4 className="font-extrabold text-slate-900 text-sm">{language === 'ar' ? permit.projectNameAr : permit.projectNameEn}</h4>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {docs.openingMinutes && (
-                            <button
-                              onClick={() => { setSelectedPermitForOpening(permit); setOpeningMinutesModalOpen(true); }}
-                              className="py-1.5 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold-hover font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-brand-gold/20 transition"
-                            >
-                              <FileSignature className="w-3.5 h-3.5" />
-                              <span>{language === 'ar' ? 'محضر فتح تحويلة' : 'Opening Minutes'}</span>
-                            </button>
-                            )}
-                            {docs.readinessReport && (
-                            <button
-                              onClick={() => { setSelectedPermitForReadiness(permit); setFieldReadinessModalOpen(true); }}
-                              className="py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-emerald-500/20 transition"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                              <span>{language === 'ar' ? 'محضر الجاهزية' : 'Readiness Report'}</span>
-                            </button>
-                            )}
-                            {docs.monitoringReport && (
-                            <button
-                              onClick={() => { setSelectedPermitForActiveAudit(permit); setActiveMonitoringModalOpen(true); }}
-                              className="py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-amber-500/20 transition"
-                            >
-                              <ClipboardCheck className="w-3.5 h-3.5" />
-                              <span>{language === 'ar' ? 'متابعة الأداء' : 'Monitoring Report'}</span>
-                            </button>
-                            )}
-                            {docs.closureMinutes && (
-                            <button
-                              onClick={() => { setSelectedPermitForClosure(permit); setClosureModalOpen(true); }}
-                              className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded flex items-center justify-center gap-1 border border-slate-300 transition"
-                            >
-                              <FileCheck className="w-3.5 h-3.5" />
-                              <span>{language === 'ar' ? 'محضر إغلاق التحويلة' : 'Closure Minutes'}</span>
-                            </button>
-                            )}
-                          </div>
-                        </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <>
+            <>
             {/* PHASE 1 */}
             {currentPhase === 1 && (
               <div className="space-y-6 animate-fade-in">
@@ -6269,7 +6076,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               )}
             </div>
             </>
-          )}
         </div>
       )}
 
@@ -6495,56 +6301,246 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
 
             {/* TAB: بانتظار مراجعة الجهة الأخرى — permits with a non-affiliated
                 owner classification are gated here until cleared, before they
-                can enter the normal Pending Review queue. */}
+                can enter the normal Pending Review queue. Uses the same
+                list + detail review layout as the inspector's Inbox, so the
+                external coordinator reviews requests the same way an
+                inspector does, with a comment box on the decision. */}
             {inspectorTab === 'external_review' && (
               <div className="space-y-4">
-                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
-                  <h3 className="font-bold text-amber-900 text-sm flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-amber-600" />
-                    {language === 'ar' ? 'طلبات بانتظار مراجعة الجهة الأخرى قبل الوصول للمفتش' : 'Requests awaiting the other entity\u2019s review before reaching the inspector'}
-                  </h3>
-                  <p className="text-xs text-amber-700 mt-0.5">
-                    {language === 'ar'
-                      ? 'هذه الطلبات مصنفة "غير تابعة للوكالة" في القسم 1.1 — لا تظهر في قائمة المراجعة العادية حتى يتم تحويلها هنا.'
-                      : 'These requests are classified "Not Affiliated with the Agency" in section 1.1 — they won\u2019t appear in the normal review queue until forwarded here.'}
-                  </p>
-                </div>
 
-                {submittedPermits.filter(p => p.status === 'PendingExternalReview').length === 0 ? (
-                  <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-xs text-slate-400 space-y-2 shadow-sm">
-                    <Shield className="w-8 h-8 text-slate-300 mx-auto" />
-                    <p>{language === 'ar' ? 'لا توجد طلبات بانتظار مراجعة الجهة الأخرى حالياً.' : 'No requests currently pending external entity review.'}</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {submittedPermits.filter(p => p.status === 'PendingExternalReview').map(permit => (
-                      <div key={permit.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-                        <div>
-                          <span className="font-mono text-slate-400 text-[10px] font-bold">{permit.id}</span>
-                          <h4 className="font-extrabold text-slate-900 text-sm">{language === 'ar' ? permit.projectNameAr : permit.projectNameEn}</h4>
-                          <span className="text-xs text-slate-500 font-medium">{language === 'ar' ? permit.contractorAr : permit.contractorEn}</span>
-                        </div>
-                        <button
-                          onClick={() => handleForwardToInspector(permit)}
-                          className="w-full py-2 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-xs rounded-lg transition flex items-center justify-center gap-1.5"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          {language === 'ar' ? 'اعتماد ومتابعة للمفتش' : 'Approve & Forward to Inspector'}
-                        </button>
+                <div className={`grid grid-cols-1 ${listPanelOpen ? 'lg:grid-cols-3' : 'lg:grid-cols-[92px_1fr]'} gap-6 items-start`}>
+
+                  {/* Proposals list, same visual pattern as the Inspector Inbox */}
+                  {listPanelOpen ? (
+                  <div className="col-span-1 lg:col-span-1 bg-white border border-slate-200 rounded-xl p-4 shadow-sm max-h-[calc(100vh-140px)] sticky top-24 overflow-y-auto space-y-2">
+                    <div className="flex items-center justify-between border-b pb-1.5">
+                      <span className="text-[11px] font-bold text-slate-450 uppercase">
+                        {language === 'ar' ? 'طلبات بانتظار المراجعة' : 'Pending External Review'}
+                      </span>
+                      <button
+                        onClick={() => setListPanelOpen(false)}
+                        title={language === 'ar' ? 'إخفاء القائمة لتوسيع مساحة العرض' : 'Collapse list for more space'}
+                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {filteredPermitsList.length === 0 ? (
+                      <div className="py-12 text-center text-xs text-slate-400 font-medium">
+                        {language === 'ar' ? 'لا توجد طلبات بانتظار مراجعة الجهة الأخرى حالياً.' : 'No requests currently pending external entity review.'}
                       </div>
-                    ))}
+                    ) : (
+                      filteredPermitsList.map(permit => {
+                        const isSelected = selectedPermitForReview?.id === permit.id;
+                        return (
+                          <button
+                            key={permit.id}
+                            onClick={() => { setSelectedPermitForReview(permit); setListPanelOpen(false); }}
+                            className={`w-full text-left p-3.5 rounded-lg border transition-all flex flex-col gap-1.5 ${
+                              isSelected
+                                ? 'bg-amber-50 border-amber-500 ring-1 ring-amber-500'
+                                : 'bg-slate-50 hover:bg-slate-100/70 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center w-full text-[10px]">
+                              <span className="font-mono text-slate-500 font-bold">{permit.id}</span>
+                              <span className="px-2 py-0.5 rounded font-bold text-[9px] bg-amber-100 text-amber-800">
+                                {language === 'ar' ? 'بانتظار الجهة الأخرى' : 'PENDING EXTERNAL'}
+                              </span>
+                            </div>
+                            <span className="font-bold text-slate-900 text-xs block leading-tight">{language === 'ar' ? permit.projectNameAr : permit.projectNameEn}</span>
+                            <span className="text-[10px] text-slate-600 font-semibold">{language === 'ar' ? permit.contractorAr : permit.contractorEn}</span>
+                            <div className="flex items-center justify-between text-[9px] text-slate-500 pt-1 border-t border-slate-200 mt-0.5">
+                              <span>📅 {permit.submittedDate}</span>
+                              <span>⚡ {permit.speed || 80} km/h</span>
+                              <span>📐 {permit.siteLength || 100}m</span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
-                )}
+                  ) : (
+                    <button
+                      onClick={() => setListPanelOpen(true)}
+                      title={language === 'ar' ? 'إظهار قائمة الطلبات' : 'Show requests list'}
+                      className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold"
+                    >
+                      <ChevronRight className="w-4 h-4 shrink-0" />
+                      <span className="text-center leading-tight">{language === 'ar' ? 'طلبات التراخيص' : 'Permit Requests'}</span>
+                    </button>
+                  )}
+
+                  {/* Detail + decision panel */}
+                  <div className={`col-span-1 ${listPanelOpen ? 'lg:col-span-2' : 'lg:col-span-1'} bg-white border border-slate-200 rounded-xl p-6 shadow-sm min-h-[500px] flex flex-col justify-between`}>
+                    {selectedPermitForReview && selectedPermitForReview.status === 'PendingExternalReview' ? (
+                      <div className="space-y-6">
+
+                        {/* Header info */}
+                        <div className="flex justify-between items-start border-b pb-4">
+                          <div>
+                            <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider block">
+                              {language === 'ar' ? 'مراجعة المنسق الخارجي' : 'External Coordinator Review'}
+                            </span>
+                            <h3 className="text-base font-extrabold text-slate-900 leading-snug">{language === 'ar' ? selectedPermitForReview.projectNameAr : selectedPermitForReview.projectNameEn}</h3>
+                            <span className="text-xs text-slate-500 font-medium">{language === 'ar' ? selectedPermitForReview.contractorAr : selectedPermitForReview.contractorEn}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-amber-100 text-amber-800">
+                              {language === 'ar' ? 'بانتظار المراجعة' : 'PENDING REVIEW'}
+                            </span>
+                            <span className="block text-[10px] text-slate-500 mt-1">Submitted: {selectedPermitForReview.submittedDate}</span>
+                          </div>
+                        </div>
+
+                        {/* Key spec figures at a glance */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200">
+                            <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.speedLimit}</span>
+                            <span className="font-bold text-slate-800">{selectedPermitForReview.speed || 80} km/h</span>
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200">
+                            <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.taperLength}</span>
+                            <span className="font-bold text-slate-800">{selectedPermitForReview.taper || 180} m</span>
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200">
+                            <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.bufferSSD}</span>
+                            <span className="font-bold text-slate-800">{selectedPermitForReview.buffer || 130} m</span>
+                          </div>
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200">
+                            <span className="block text-[10px] text-slate-400 uppercase font-bold">{t.terminationLength}</span>
+                            <span className="font-bold text-slate-800">{selectedPermitForReview.termination || 30} m</span>
+                          </div>
+                        </div>
+
+                        {/* Official Permit File Download Actions */}
+                        <div className="flex flex-wrap gap-2 justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              onClick={() => downloadOfficialPermitFile(selectedPermitForReview)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition shadow"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              <span>{language === 'ar' ? 'تحميل ملف التصريح الرسمي' : 'Download Official Permit'}</span>
+                            </button>
+                            <button
+                              onClick={() => downloadUploadedCadFile(selectedPermitForReview)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded transition shadow"
+                            >
+                              <Download className="h-3.5 w-3.5 text-brand-gold" />
+                              <span>{language === 'ar' ? 'تحميل مخطط الـ CAD المرفوع' : 'Download Uploaded CAD File'}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* External Official Permit File Attachment Verification Box */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-brand-primary/10 text-brand-primary rounded-lg">
+                              <FileText className="w-5 h-5 text-brand-primary" />
+                            </div>
+                            <div>
+                              <span className="block font-bold text-slate-900 text-xs">
+                                {language === 'ar' ? 'مستند تصريح الحفر الصادر من الجهة الخارجية:' : 'Official External Permit File:'}
+                              </span>
+                              <span className="text-[11px] text-slate-500 font-mono">
+                                {selectedPermitForReview.externalPermitDocName || (language === 'ar' ? 'تصريح_حفر_جهة_خارجية_معتمد.pdf' : 'Official_External_Permit.pdf')}
+                              </span>
+                            </div>
+                          </div>
+                          {selectedPermitForReview.externalPermitDocument ? (
+                            <a
+                              href={selectedPermitForReview.externalPermitDocument}
+                              download={selectedPermitForReview.externalPermitDocName || 'Official_External_Permit.pdf'}
+                              className="px-3 py-1.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-xs rounded-lg transition flex items-center gap-1 shadow-sm"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>{language === 'ar' ? 'تحميل التصريح' : 'Download File'}</span>
+                            </a>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold text-[10px] rounded flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>{language === 'ar' ? 'مستند خارجي موثق' : 'Verified Attachment'}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Comment box + Approve / Reject decision — the external
+                            coordinator's job only. Inspectors can see the
+                            request here but cannot approve/reject it themselves. */}
+                        {activePortalMode === 'external_entity' ? (
+                          <div className="border border-slate-200 rounded-xl overflow-hidden">
+                            <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold text-xs text-slate-700 flex items-center gap-2">
+                              <Edit3 className="w-4 h-4 text-brand-primary" />
+                              {language === 'ar' ? 'ملاحظات المنسق الخارجي وقرار المراجعة' : 'External Coordinator Comments & Decision'}
+                            </div>
+                            <div className="p-4 space-y-4">
+                              <textarea
+                                value={inspectorNotes}
+                                onChange={(e) => setInspectorNotes(e.target.value)}
+                                placeholder={language === 'ar' ? 'أدخل ملاحظات المراجعة أو سبب الاعتماد/الرفض هنا...' : 'Enter your review comments or the reason for approval/rejection here...'}
+                                className="w-full border border-slate-300 rounded p-3 text-xs min-h-[80px] focus:ring-1 focus:ring-brand-primary"
+                              />
+                              <div className="flex flex-wrap gap-3">
+                                <button
+                                  onClick={() => handleUpdatePermitStatus('Clean')}
+                                  className="flex-1 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  {language === 'ar' ? 'اعتماد ومتابعة للمفتش' : 'Approve & Forward to Inspector'}
+                                </button>
+                                <button
+                                  onClick={() => handleUpdatePermitStatus('Rejected')}
+                                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow"
+                                >
+                                  <X className="w-4 h-4" />
+                                  {language === 'ar' ? 'رفض الطلب' : 'Reject Request'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="border border-amber-200 bg-amber-50 rounded-xl p-4 flex items-center gap-3 text-xs text-amber-800">
+                            <Shield className="w-5 h-5 text-amber-500 shrink-0" />
+                            <span>
+                              {language === 'ar'
+                                ? 'هذا الطلب بانتظار قرار المنسق الخارجي. الاعتماد أو الرفض من اختصاص الجهة الخارجية فقط، وسيظهر الطلب في صندوق الوارد بعد اعتماده.'
+                                : 'This request is awaiting the External Coordinator\u2019s decision. Approving or rejecting it is the External Coordinator\u2019s responsibility only — it will appear in your Inbox once approved.'}
+                            </span>
+                          </div>
+                        )}
+
+                      </div>
+                    ) : (
+                      <div className="my-auto text-center py-12 text-slate-400 text-xs flex flex-col items-center justify-center space-y-2">
+                        <Shield className="h-8 w-8 text-slate-300" />
+                        <span>{language === 'ar' ? 'الرجاء اختيار أحد الطلبات من القائمة لمراجعته واتخاذ القرار.' : 'Please select a request from the list to review and decide.'}</span>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
               </div>
             )}
 
             {/* TAB 1: SUBMITTED PERMITS INBOX GRID */}
             {inspectorTab === 'inbox' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            <div className={`grid grid-cols-1 ${listPanelOpen ? 'lg:grid-cols-3' : 'lg:grid-cols-[92px_1fr]'} gap-6 items-start`}>
               
               {/* Proposals Table List (Scales dynamically down the page) */}
+              {listPanelOpen ? (
               <div className="col-span-1 lg:col-span-1 bg-white border border-slate-200 rounded-xl p-4 shadow-sm max-h-[calc(100vh-140px)] sticky top-24 overflow-y-auto space-y-2">
-                <span className="block text-[11px] font-bold text-slate-450 uppercase border-b pb-1.5">{language === 'ar' ? 'طلبات التراخيص الواردة (قيد القرار)' : 'Inbox Proposals'}</span>
+                <div className="flex items-center justify-between border-b pb-1.5">
+                  <span className="text-[11px] font-bold text-slate-450 uppercase">{language === 'ar' ? 'طلبات التراخيص الواردة (قيد القرار)' : 'Inbox Proposals'}</span>
+                  <button
+                    onClick={() => setListPanelOpen(false)}
+                    title={language === 'ar' ? 'إخفاء القائمة لتوسيع مساحة العرض' : 'Collapse list for more space'}
+                    className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
                 
                 {filteredPermitsList.length === 0 ? (
                   <div className="py-12 text-center text-xs text-slate-400 font-medium">No results found.</div>
@@ -6554,7 +6550,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                     return (
                       <button
                         key={permit.id}
-                        onClick={() => setSelectedPermitForReview(permit)}
+                        onClick={() => { setSelectedPermitForReview(permit); setListPanelOpen(false); }}
                         className={`w-full text-left p-3.5 rounded-lg border transition-all flex flex-col gap-1.5 ${
                           isSelected 
                             ? 'bg-brand-primary/10 border-brand-primary ring-1 ring-brand-primary' 
@@ -6581,9 +6577,19 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   })
                 )}
               </div>
+              ) : (
+                <button
+                  onClick={() => setListPanelOpen(true)}
+                  title={language === 'ar' ? 'إظهار قائمة الطلبات' : 'Show requests list'}
+                  className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold"
+                >
+                  <ChevronRight className="w-4 h-4 shrink-0" />
+                  <span className="text-center leading-tight">{language === 'ar' ? 'طلبات التراخيص' : 'Permit Requests'}</span>
+                </button>
+              )}
 
               {/* Inspector Detailed Permit Review View Panel */}
-              <div className="col-span-1 lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm min-h-[500px] flex flex-col justify-between">
+              <div className={`col-span-1 ${listPanelOpen ? 'lg:col-span-2' : 'lg:col-span-1'} bg-white border border-slate-200 rounded-xl p-6 shadow-sm min-h-[500px] flex flex-col justify-between`}>
                 {selectedPermitForReview ? (
                   <div className="space-y-6">
                     
