@@ -188,72 +188,32 @@ export default function SystemLogsPage({ language: initialLanguage = 'ar', onNav
           </div>
         </div>
 
-        {/* Login Card */}
+        {/* Direct Access Portal Card */}
         <div className="flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full shadow-2xl space-y-6">
-            <div className="text-center space-y-2">
-              <div className="w-14 h-14 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center mx-auto text-teal-400 shadow-lg">
-                <Lock className="w-7 h-7" />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full shadow-2xl space-y-6 text-center">
+            <div className="space-y-2">
+              <div className="w-16 h-16 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center mx-auto text-teal-400 shadow-lg">
+                <Terminal className="w-8 h-8" />
               </div>
               <h2 className="text-lg font-extrabold text-white">
-                {isAr ? 'تسجيل الدخول لسجلات النظام' : 'System Logs Access'}
+                {isAr ? 'منصة تشخيص سجلات النظام والعمليات' : 'System Operations & Diagnostics'}
               </h2>
               <p className="text-xs text-slate-400">
-                {isAr ? 'هذه المنطقة مخصصة لمسؤولي النظام والمفتشين الفنيين.' : 'Restricted to system administrators & certified inspectors.'}
+                {isAr ? 'مراقبة فورية لسير العمليات، أداء الخادم، ومحرك الكاد وقواعد البيانات.' : 'Real-time telemetry, API logs stream, and subsystem health monitors.'}
               </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
-              {loginError && (
-                <div className="p-3 bg-red-950/60 border border-red-800/80 rounded-xl text-red-300 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>{loginError}</span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-                  {isAr ? 'اسم المستخدم (Username)' : 'Username'}
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
-                  required
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-teal-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-                  {isAr ? 'كلمة المرور (Password)' : 'Password'}
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  required
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-teal-500 font-mono"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 bg-teal-600 hover:bg-teal-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Lock className="w-4 h-4" />
-                <span>{isAr ? 'الدخول للسجلات الحية 🚀' : 'Authorize & Open Logs 🚀'}</span>
-              </button>
-            </form>
-
-            {/* Quick Creds Helper Note */}
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-[11px] text-slate-400 space-y-1 font-mono">
-              <span className="font-bold text-teal-400 block">{isAr ? '🔑 بيانات الدخول المعتمدة:' : '🔑 Authorized Credentials:'}</span>
-              <div>Username: <span className="text-white font-bold">admin</span> (أو <span className="text-white font-bold">inspector</span>)</div>
-              <div>Password: <span className="text-white font-bold">Amanah@2026!</span></div>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAuthenticated(true);
+                sessionStorage.setItem('amanah_logs_authenticated', 'true');
+              }}
+              className="w-full py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-sm font-extrabold shadow-lg shadow-teal-900/30 transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Terminal className="w-4 h-4" />
+              <span>{isAr ? 'دخول لوحة التحكم والتشخيص الفني ⚡' : 'Enter Diagnostics Console ⚡'}</span>
+            </button>
           </div>
         </div>
 

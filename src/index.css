@@ -128,3 +128,103 @@ input, select, textarea, button {
   backface-visibility: hidden !important;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   PRO-GRADE DOCUMENT PRINT ENGINE (@media print)
+══════════════════════════════════════════════════════════════════ */
+@page {
+  size: A4 portrait;
+  margin: 10mm 12mm 12mm 12mm;
+}
+
+@media print {
+  *, *::before, *::after {
+    box-sizing: border-box !important;
+    text-shadow: none !important;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11pt !important;
+    line-height: 1.45 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide interactive non-printable UI chrome */
+  nav, header, footer,
+  button,
+  .no-print,
+  .leaflet-control-container,
+  .leaflet-control-zoom,
+  .leaflet-control-attribution,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Ensure all printable containers expand smoothly across pages */
+  #printable-permit,
+  .printable-report,
+  .printable-document,
+  .min-h-screen {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    background: #ffffff !important;
+  }
+
+  /* Avoid page-break cutoffs across critical blocks */
+  .print-break-inside-avoid,
+  .stakeholder-signatures,
+  table, tr, tbody,
+  .border,
+  .rounded-xl,
+  .rounded-2xl,
+  .grid,
+  .grid > div {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Keep section headers attached to their tables/content */
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid !important;
+    page-break-after: avoid !important;
+  }
+
+  /* High-Definition Leaflet satellite map print sizing */
+  #report-leaflet-map,
+  .report-map-container {
+    height: 320px !important;
+    max-height: 320px !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    overflow: hidden !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Inverted color adjustments for print clarity */
+  .bg-slate-950,
+  .bg-slate-900 {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+  }
+}
+

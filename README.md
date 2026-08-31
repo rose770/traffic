@@ -30,10 +30,8 @@ An advanced geospatial engineering and traffic detour lifecycle management platf
 5. **Stage 5 — Remove & Close the Detour (محضر الإغلاق النهائي)**: Road condition restoration verification and final closure minutes archiving.
 
 ### 4. 🖥️ Live Diagnostics & System Logs Portal (`/logs`)
-* **Dedicated Route**: Access directly at `/logs` (or `/#/logs`) or via the top header navigation button.
-* **Role-Based Authentication Gate**:
-  * **Username**: `admin` *(or `inspector`)*
-  * **Password**: `Amanah@2026!`
+* **Dedicated Route**: Access directly at `/logs` (or `/#/logs`).
+* **Direct Access Console**: One-click authentication button to enter the live diagnostics console.
 * **Telemetry Dashboard**: Live server uptime, RAM / Memory RSS, database permit counts, and CAD subsystem status.
 * **Live Log Stream**: Level filtering (`ALL`, `INFO`, `WARNING`, `ERROR`), text search, JSON context inspection, and one-click log file export (`.log`).
 

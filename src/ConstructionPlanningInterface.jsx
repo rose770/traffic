@@ -698,9 +698,28 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
   // without filling every required field. Set back to false before any
   // real demo/handoff, since it disables the validation the standard
   // will expect to see working.
-  const DEV_SKIP_VALIDATION = true;
+  const DEV_SKIP_VALIDATION = false;
 
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('amanah_user_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('amanah_user_session', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('amanah_user_session');
+    }
+  }, [currentUser]);
+
+  // Stage advancement attempt tracking (only show missing-field warnings after user tries to advance/submit)
+  const [attemptedStages, setAttemptedStages] = useState({ 1: false, 2: false, 3: false });
+
   // Shown once right after login, before the wizard/inspector console.
   const [showHomeScreen, setShowHomeScreen] = useState(true);
   const [language, setLanguage] = useState('ar'); // 'ar' or 'en'
@@ -1208,24 +1227,25 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     return val === undefined || val === null || (typeof val === 'string' && val.trim() === '') || (typeof val === 'number' && val === 0);
   };
 
-  const renderFieldHeader = (label, fieldName, isRequired = true) => {
+  const renderFieldHeader = (label, fieldName, isRequired = true, phase = currentPhase) => {
     const isMissing = isFieldMissing(fieldName);
+    const showRequiredBadge = attemptedStages[phase] && isMissing && isRequired;
     return (
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <label className="block text-xs font-bold text-slate-700 uppercase">
           {label}
         </label>
-        {isMissing ? (
-          isRequired ? (
-            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs animate-pulse">
-              <span>⚠️</span>
-              <span>{language === 'ar' ? 'مطلوب استكماله' : 'Required'}</span>
-            </span>
-          ) : (
+        {showRequiredBadge ? (
+          <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs animate-pulse">
+            <span>⚠️</span>
+            <span>{language === 'ar' ? 'مطلوب استكماله' : 'Required'}</span>
+          </span>
+        ) : isMissing ? (
+          !isRequired ? (
             <span className="text-[10px] text-slate-400 font-medium px-1.5 py-0.5">
               <span>{language === 'ar' ? '(اختياري)' : '(Optional)'}</span>
             </span>
-          )
+          ) : null
         ) : (
           <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5">
             <Check className="h-3 w-3" />
@@ -1236,8 +1256,8 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     );
   };
 
-  const getFieldInputClass = (fieldName, isRequired = true, extraClass = '') => {
-    const missing = isRequired && isFieldMissing(fieldName);
+  const getFieldInputClass = (fieldName, isRequired = true, extraClass = '', phase = currentPhase) => {
+    const missing = attemptedStages[phase] && isRequired && isFieldMissing(fieldName);
     const base = 'block w-full rounded-lg text-xs transition p-2.5 ';
     if (missing) {
       return base + 'bg-amber-50/40 border-2 border-amber-300 focus:border-amber-500 focus:ring-amber-200 text-slate-900 font-medium ' + extraClass;
@@ -1326,6 +1346,12 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
       return parseFloat(formData.proposedTaper) > 0 && 
              parseFloat(formData.proposedBuffer) > 0 && 
              parseFloat(formData.proposedTermination) > 0;
+    }
+    if (panelName === 'p3_auditor') {
+      if (formData.includePedestrianPath !== false) {
+        return !!(language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn);
+      }
+      return true;
     }
     return true;
   };
@@ -1431,6 +1457,8 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     tempBridgesEn: '',
     pedestrianStart: '',
     pedestrianEnd: '',
+    pedestrianCrossingSpecsAr: '',
+    pedestrianCrossingSpecsEn: '',
     vehicleStart: '',
     vehicleEnd: '',
 
@@ -2972,7 +3000,18 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     setBoundaryPoints([]);
   };
 
-  const nextPhase = () => setCurrentPhase(prev => Math.min(prev + 1, 3));
+  const nextPhase = () => {
+    if (!isPhaseComplete(currentPhase)) {
+      setAttemptedStages(prev => ({ ...prev, [currentPhase]: true }));
+      setToastNotification({
+        type: 'warning',
+        title: language === 'ar' ? 'بيانات المرحلة غير مكتملة' : 'Stage Incomplete',
+        text: language === 'ar' ? 'يرجى استكمال الحقول الإلزامية المحددة باللون الأصفر قبل الانتقال للمرحلة التالية.' : 'Please complete the required fields highlighted in amber before proceeding.'
+      });
+      return;
+    }
+    setCurrentPhase(prev => Math.min(prev + 1, 3));
+  };
   const prevPhase = () => setCurrentPhase(prev => Math.max(prev - 1, 1));
 
   // Auto-sync boundaryPoints to formData.coordinates string
@@ -3084,12 +3123,16 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     if (formData.includePedestrianPath !== false && isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && !formData.pedestrianPathProvided) {
       issues.push(language === 'ar' ? 'طول التحويلة يتجاوز 400م ولم يتم تأكيد توفير ممر مشاة.' : 'Diversion length exceeds 400m and a pedestrian path has not been confirmed.');
     }
+    if (formData.includePedestrianPath !== false && !(language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn)) {
+      issues.push(language === 'ar' ? 'مواصفات وتأمين معابر المشاة في البند ٣.٢ غير مكتملة.' : 'Pedestrian crossing & safety specifications in Section 3.2 are missing.');
+    }
     return issues;
   };
 
   const submitContractorForm = async () => {
     const blockingIssues = DEV_SKIP_VALIDATION ? [] : getSubmissionBlockingIssues();
     if (blockingIssues.length > 0) {
+      setAttemptedStages({ 1: true, 2: true, 3: true });
       showToast(
         language === 'ar' ? 'تعذر إرسال الطلب — بيانات ناقصة' : 'Submission Blocked — Incomplete Data',
         blockingIssues.join(' '),
@@ -3934,25 +3977,27 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               </div>
             </div>
 
-            {/* Roadway SVG layout representation */}
-            <div className="mt-6 border-b border-slate-200 pb-6">
-              <h3 className="text-sm font-bold text-brand-primary uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Layers className="h-4 w-4" /> {language === 'ar' ? 'الرسم الهندسي التخطيطي لمسافات السلامة للتحويلة' : 'Detour Safety Layout Schematic'}
-              </h3>
-              <div className="my-3">
-                {renderHorizontalLayoutSVG()}
+            {/* Pedestrian Crossing Specs (if included) */}
+            {formData.includePedestrianPath !== false && (language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn) && (
+              <div className="mt-6 border-b border-slate-200 pb-6 print:break-inside-avoid">
+                <h3 className="text-sm font-bold text-brand-primary uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <span>🚶</span> {language === 'ar' ? 'مواصفات وتأمين مسارات ومعابر المشاة' : 'Pedestrian Crossing & Safe Corridor Specifications'}
+                </h3>
+                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-xs text-slate-800 font-sans leading-relaxed">
+                  {language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Dimension audit card */}
-            <div className="mt-6 border-b border-slate-200 pb-6">
+            <div className="mt-6 border-b border-slate-200 pb-6 print:break-inside-avoid">
               <h3 className="text-sm font-bold text-brand-primary uppercase tracking-wide mb-2 flex items-center gap-1">
                 <Calculator className="h-4 w-4" /> {language === 'ar' ? 'نتائج مطابقة الأبعاد الهندسية لكود وزارة النقل' : 'Detour Safety Dimension Compliance Logs'}
               </h3>
               
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden" dir={t.dir}>
-                  <thead className="bg-slate-50 font-bold text-slate-700 border-b border-slate-200">
+                <table className="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden print:border-slate-300" dir={t.dir}>
+                  <thead className="bg-slate-50 font-bold text-slate-700 border-b border-slate-200 print:bg-slate-100">
                     <tr>
                       <th className="p-3">{language === 'ar' ? 'العنصر الهندسي للسلامة' : ' Detour Element'}</th>
                       <th className="p-3 text-center">{language === 'ar' ? 'الحد الأدنى المطلوب' : 'MOT Minimum Required'}</th>
@@ -4003,7 +4048,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             </div>
 
             {/* Technical Compliance Checklists */}
-            <div className="mt-6 border-b border-slate-200 pb-6">
+            <div className="mt-6 border-b border-slate-200 pb-6 print:break-inside-avoid">
               <h3 className="text-sm font-bold text-brand-primary uppercase tracking-wide mb-2 flex items-center gap-1">
                 <CheckSquare className="h-4 w-4" /> {t.section6Title}
               </h3>
@@ -4024,37 +4069,37 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             </div>
 
             {/* 5-Party Official Stakeholder E-Signatures (Gap 5 Mandate) */}
-            <div className="mt-10 pt-8 border-t-2 border-slate-300">
+            <div className="mt-8 pt-6 border-t-2 border-slate-300 print:break-inside-avoid print:mt-4 print:pt-4">
               <h4 className="text-[11px] font-extrabold text-slate-700 uppercase mb-4 tracking-wider">
                 {language === 'ar' ? 'اعتمادات وتوقيعات أطراف محضر التنسيق الـ ٥ (معتمدة إلكترونياً):' : 'Official 5-Party Stakeholder E-Signatures (Mandatory):'}
               </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-[10px]">
-                <div className="border border-slate-200 p-2.5 rounded-lg bg-slate-50">
-                  <div className="h-8 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-emerald-700 font-bold">✓ SIGNED E-ID</div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-[10px] print:grid-cols-5">
+                <div className="border border-slate-300 p-2.5 rounded-lg bg-slate-50 print:bg-white">
+                  <div className="h-7 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-emerald-700 font-bold">✓ SIGNED E-ID</div>
                   <div className="mt-1.5 font-bold text-slate-800 text-[11px]">{language === 'ar' ? (formData.projectManagerAr || 'م. طارق الحربي') : 'Eng. Tareq Al-Harbi'}</div>
                   <div className="text-slate-500 font-medium">{language === 'ar' ? '١. مندوب المقاول المنفذ' : '1. Contractor Representative'}</div>
                 </div>
 
-                <div className="border border-slate-200 p-2.5 rounded-lg bg-slate-50">
-                  <div className="h-8 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-emerald-700 font-bold">✓ SIGNED E-ID</div>
+                <div className="border border-slate-300 p-2.5 rounded-lg bg-slate-50 print:bg-white">
+                  <div className="h-7 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-emerald-700 font-bold">✓ SIGNED E-ID</div>
                   <div className="mt-1.5 font-bold text-slate-800 text-[11px]">{language === 'ar' ? 'د. عبدالمجيد الغامدي' : 'Dr. Abdulmajeed Al-Ghamdi'}</div>
                   <div className="text-slate-500 font-medium">{language === 'ar' ? '٢. الاستشاري المشرف' : '2. Supervising Consultant'}</div>
                 </div>
 
-                <div className="border border-slate-200 p-2.5 rounded-lg bg-slate-50">
-                  <div className="h-8 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
+                <div className="border border-slate-300 p-2.5 rounded-lg bg-slate-50 print:bg-white">
+                  <div className="h-7 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
                   <div className="mt-1.5 font-bold text-slate-800 text-[11px]">{language === 'ar' ? 'إدارة السلامة المرورية' : 'Safety Dept. Delegate'}</div>
                   <div className="text-slate-500 font-medium">{language === 'ar' ? '٣. مندوب إدارة السلامة' : '3. Safety Dept. Officer'}</div>
                 </div>
 
-                <div className="border border-slate-200 p-2.5 rounded-lg bg-slate-50">
-                  <div className="h-8 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
+                <div className="border border-slate-300 p-2.5 rounded-lg bg-slate-50 print:bg-white">
+                  <div className="h-7 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
                   <div className="mt-1.5 font-bold text-slate-800 text-[11px]">{language === 'ar' ? 'شركة صيانة الطرق' : 'Maintenance Contractor'}</div>
                   <div className="text-slate-500 font-medium">{language === 'ar' ? '٤. مقاول الصيانة' : '4. Maintenance Contractor'}</div>
                 </div>
 
-                <div className="border border-slate-200 p-2.5 rounded-lg bg-slate-50">
-                  <div className="h-8 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
+                <div className="border border-slate-300 p-2.5 rounded-lg bg-slate-50 print:bg-white">
+                  <div className="h-7 border-b border-slate-300 flex items-center justify-center font-mono text-[9px] text-slate-400 font-bold">⏳ PENDING</div>
                   <div className="mt-1.5 font-bold text-slate-800 text-[11px]">{language === 'ar' ? 'مكتب استشارات الصيانة' : 'Maintenance Consultant'}</div>
                   <div className="text-slate-500 font-medium">{language === 'ar' ? '٥. استشاري الصيانة' : '5. Maintenance Consultant'}</div>
                 </div>
@@ -4221,19 +4266,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               </div>
 
               <button 
-                type="button"
-                onClick={() => {
-                  if (onNavigateToLogs) onNavigateToLogs();
-                  else setShowLogsModal(true);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 border border-teal-500/40 rounded-lg text-xs font-semibold text-teal-400 transition shadow cursor-pointer"
-                title={language === 'ar' ? 'سجل العمليات والتشخيص الفني (/logs)' : 'System Operations & Logs Console (/logs)'}
-              >
-                <Terminal className="h-3.5 w-3.5 text-teal-400" />
-                <span className="hidden sm:inline">{language === 'ar' ? 'سجل النظام (/logs)' : 'System Logs (/logs)'}</span>
-              </button>
-
-              <button 
                 onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
                 className="flex items-center gap-2 px-3 py-1.5 bg-brand-dark-hover/40 hover:bg-brand-dark-hover/70 border border-brand-gold/30 rounded-lg text-xs font-semibold text-brand-gold transition shadow"
               >
@@ -4284,13 +4316,18 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                     <div key={step} className="flex flex-col items-center">
                       <button
                         onClick={() => {
-                          if (step === 2 && !isPhaseComplete(1)) {
-                            alert(language === 'ar' ? 'يرجى إكمال جميع متطلبات الخطوة الأولى أولاً.' : 'Please complete all Phase 1 requirements first.');
-                            return;
-                          }
-                          if (step === 3 && (!isPhaseComplete(1) || !isPhaseComplete(2))) {
-                            alert(language === 'ar' ? 'يرجى إكمال متطلبات الخطوة الأولى والثانية أولاً.' : 'Please complete all Phase 1 & 2 requirements first.');
-                            return;
+                          if (step > currentPhase) {
+                            for (let p = currentPhase; p < step; p++) {
+                              if (!isPhaseComplete(p)) {
+                                setAttemptedStages(prev => ({ ...prev, [p]: true }));
+                                setToastNotification({
+                                  type: 'warning',
+                                  title: language === 'ar' ? 'بيانات المرحلة غير مكتملة' : 'Stage Incomplete',
+                                  text: language === 'ar' ? `يرجى إكمال جميع متطلبات المرحلة ${p} أولاً.` : `Please complete all requirements for Phase ${p} first.`
+                                });
+                                return;
+                              }
+                            }
                           }
                           setCurrentPhase(step);
                         }}
@@ -5542,6 +5579,39 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </div>
                       </div>
 
+                      {/* Pedestrian Crossing & Safe Corridor Specs (Mandatory when pedestrian path is included) */}
+                      {formData.includePedestrianPath !== false && (
+                        <div className="bg-gradient-to-r from-emerald-50/90 to-teal-50/50 border border-emerald-300 rounded-xl p-4 space-y-2 shadow-xs animate-fade-in">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <label className="block text-xs font-bold text-emerald-950 uppercase flex items-center gap-1.5">
+                              <span>🚶</span>
+                              <span>{language === 'ar' ? 'مواصفات وتأمين معابر وممرات المشاة (PEDESTRIAN CROSSING & SAFE CORRIDOR SPECS) *' : 'PEDESTRIAN CROSSING & SAFE CORRIDOR SPECS *'}</span>
+                            </label>
+                            <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                              {language === 'ar' ? 'إلزامي للتحويلات المشتملة على مسار مشاة' : 'Mandatory for Pedestrian Route'}
+                            </span>
+                          </div>
+                          {renderFieldHeader(
+                            language === 'ar' ? 'تفاصيل ومعايير تأمين معبر وممر المشاة' : 'Pedestrian Crossing & Safety Details',
+                            language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn',
+                            true,
+                            3
+                          )}
+                          <textarea
+                            rows="2"
+                            name={language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn'}
+                            value={language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn}
+                            onChange={handleInputChange}
+                            placeholder={language === 'ar' ? 'حدد مسارات ومواصفات حماية معابر المشاة، الحواجز العازلة، المنحدرات لذوي الإعاقة، وإشارات العبور...' : 'Specify pedestrian crossing corridors, safety fencing, ADA ramps, and tactile/warning signs...'}
+                            className={getFieldInputClass(
+                              language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn',
+                              true,
+                              'bg-white text-slate-800 focus:ring-2 focus:ring-emerald-400',
+                              3
+                            )}
+                          />
+                        </div>
+                      )}
 
                       {/* Arterial Road Crash Attenuators Card */}
                       <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4 shadow-xs">
