@@ -133,7 +133,7 @@ input, select, textarea, button {
 ══════════════════════════════════════════════════════════════════ */
 @page {
   size: A4 portrait;
-  margin: 10mm 12mm 12mm 12mm;
+  margin: 8mm 10mm 8mm 10mm;
 }
 
 @media print {
@@ -145,8 +145,8 @@ input, select, textarea, button {
   html, body {
     background: #ffffff !important;
     color: #0f172a !important;
-    font-size: 11pt !important;
-    line-height: 1.45 !important;
+    font-size: 10.5pt !important;
+    line-height: 1.4 !important;
     margin: 0 !important;
     padding: 0 !important;
     height: auto !important;
@@ -156,10 +156,12 @@ input, select, textarea, button {
     print-color-adjust: exact !important;
   }
 
-  /* Hide interactive non-printable UI chrome */
+  /* Hide all interactive non-printable UI chrome */
   nav, header, footer,
   button,
   .no-print,
+  .print-hidden,
+  .print\:hidden,
   .leaflet-control-container,
   .leaflet-control-zoom,
   .leaflet-control-attribution,
@@ -167,7 +169,7 @@ input, select, textarea, button {
     display: none !important;
   }
 
-  /* Ensure all printable containers expand smoothly across pages */
+  /* Ensure all printable containers expand smoothly without artificial padding */
   #printable-permit,
   .printable-report,
   .printable-document,
@@ -188,8 +190,9 @@ input, select, textarea, button {
 
   /* Avoid page-break cutoffs across critical blocks */
   .print-break-inside-avoid,
+  .print\:break-inside-avoid,
   .stakeholder-signatures,
-  table, tr, tbody,
+  table, tr, tbody, thead,
   .border,
   .rounded-xl,
   .rounded-2xl,
@@ -208,8 +211,9 @@ input, select, textarea, button {
   /* High-Definition Leaflet satellite map print sizing */
   #report-leaflet-map,
   .report-map-container {
-    height: 320px !important;
-    max-height: 320px !important;
+    height: 220px !important;
+    max-height: 220px !important;
+    width: 100% !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     overflow: hidden !important;

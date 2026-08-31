@@ -3894,10 +3894,10 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
     const hasAnyDeviation = isTaperDeviation || isBufferDeviation || isTermDeviation;
 
     return (
-      <div className="min-h-screen bg-brand-light text-brand-text-dark py-10 px-4 sm:px-6 lg:px-8 font-sans transition-all duration-500" dir={t.dir}>
-        <div className="max-w-4xl mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden p-8 animate-fade-in">
+      <div className="min-h-screen bg-brand-light text-brand-text-dark py-10 px-4 sm:px-6 lg:px-8 font-sans transition-all duration-500 print:min-h-0 print:py-0 print:px-0 print:bg-white print:text-slate-900" dir={t.dir}>
+        <div className="max-w-4xl mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden p-8 animate-fade-in print:max-w-none print:w-full print:p-0 print:m-0 print:border-none print:shadow-none print:rounded-none print:overflow-visible">
           
-          <div className="flex flex-col items-center text-center pb-8 border-b border-slate-200">
+          <div className="flex flex-col items-center text-center pb-8 border-b border-slate-200 print:hidden no-print">
             <div className="h-16 w-16 bg-brand-primary/10 text-brand-primary rounded-full flex items-center justify-center mb-4 ring-4 ring-brand-primary/5">
               <FileCheck className="h-10 w-10 text-brand-primary" />
             </div>
@@ -3922,7 +3922,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             <div className="mt-6 flex flex-wrap gap-3 justify-center">
               <button 
                 onClick={() => window.print()} 
-                className="flex items-center gap-2 px-5 py-2 text-brand-text-dark bg-slate-100 hover:bg-slate-200 font-semibold rounded-lg border border-slate-350 transition text-xs"
+                className="flex items-center gap-2 px-5 py-2 text-brand-text-dark bg-slate-100 hover:bg-slate-200 font-semibold rounded-lg border border-slate-350 transition text-xs cursor-pointer shadow-sm"
               >
                 <Printer className="h-4 w-4" /> {t.print}
               </button>
@@ -3930,7 +3930,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
           </div>
 
           {/* Printable Permit report preview */}
-          <div className="py-8 bg-white text-slate-900 rounded-xl p-8 shadow-inner mt-8 border border-slate-300 print:p-0 print:border-none print:shadow-none" id="printable-permit" dir={t.dir}>
+          <div className="py-8 bg-white text-slate-900 rounded-xl p-8 shadow-inner mt-8 border border-slate-300 print:p-0 print:m-0 print:mt-0 print:border-none print:shadow-none print:rounded-none" id="printable-permit" dir={t.dir}>
             
             {/* Header info */}
             <div className="flex justify-between items-start border-b-2 border-brand-primary pb-6">
