@@ -556,7 +556,7 @@ const ReportSatelliteMapView = ({ permit, language = 'ar' }) => {
       attributionControl: false
     });
 
-    window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+    window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       attribution: 'Map data &copy; Google Maps Satellite'
@@ -1211,9 +1211,15 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
       }
 
       if (extractedInfo.latitude && extractedInfo.longitude) {
+        const lat = Number(extractedInfo.latitude);
+        const lng = Number(extractedInfo.longitude);
+        const x = Math.round(582500 + (lng - 39.6120) * 100000);
+        const y = Math.round(2703800 + (lat - 24.4686) * 110000);
         setBoundaryPoints([{
-          lat: extractedInfo.latitude,
-          lng: extractedInfo.longitude,
+          lat,
+          lng,
+          x,
+          y,
           id: Date.now()
         }]);
       }
@@ -2169,10 +2175,27 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         attributionControl: false
       });
 
-      window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+      const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+        attribution: 'Map data &copy; Google Maps Satellite'
+      }).addTo(map);
+
+      const esriSatLayer = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar'
+      });
+
+      const googleHybridLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 20,
         subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
-      }).addTo(map);
+      });
+
+      window.L.control.layers({
+        "🛰️ Google Satellite (Pure)": googlePureSatLayer,
+        "🛰️ Esri Satellite": esriSatLayer,
+        "🌍 Google Hybrid (Labels)": googleHybridLayer
+      }, null, { position: 'topright' }).addTo(map);
 
       phase1MapInstance.current = map;
       phase1MarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2346,12 +2369,27 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         scrollWheelZoom: false
       });
 
-      window.L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&scale=2', {
-        maxZoom: 22,
-        subdomains: ['0', '1', '2', '3'],
-        tileSize: 512,
-        zoomOffset: -1
+      const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+        attribution: 'Map data &copy; Google Maps Satellite'
       }).addTo(map);
+
+      const esriSatLayer = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar'
+      });
+
+      const googleHybridLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+      });
+
+      window.L.control.layers({
+        "🛰️ Google Satellite (Pure)": googlePureSatLayer,
+        "🛰️ Esri Satellite": esriSatLayer,
+        "🌍 Google Hybrid (Labels)": googleHybridLayer
+      }, null, { position: 'topright' }).addTo(map);
 
       reportMapInstance.current = map;
       reportMarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2599,13 +2637,13 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
       attributionControl: false
     });
 
-    const googleSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+    const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       attribution: 'Map data &copy; Google Maps Satellite'
     }).addTo(map);
 
-    const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+    const googleSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       attribution: 'Map data &copy; Google Maps Satellite'
@@ -2794,19 +2832,35 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
 
   // Sync coordinates textbox & auto-calculate length on boundaryPoints changes
   useEffect(() => {
-    if (boundaryPoints.length > 0) {
-      // Use real lat/lng for coordinates display
+    if (boundaryPoints && boundaryPoints.length > 0) {
+      const labelsEn = ['Detour Start (N1)', 'Detour End (N2)', 'Pedestrian Start (N3)', 'Pedestrian End (N4)'];
+      const labelsAr = ['بداية التحويلة (N1)', 'نهاية التحويلة (N2)', 'بداية ممر المشاة (N3)', 'نهاية ممر المشاة (N4)'];
+
       const coordString = boundaryPoints.map((p, idx) => {
-        const labels = ['Detour Start', 'Detour End', 'Ped. Start', 'Ped. End'];
-        const labelsAr = ['بداية التحويلة', 'نهاية التحويلة', 'بداية المشاة', 'نهاية المشاة'];
-        return `N${idx + 1} (${labelsAr[idx] || ''}): Lat ${p.lat?.toFixed(6) || p.y}, Lng ${p.lng?.toFixed(6) || p.x}`;
+        const lat = p.lat != null && !isNaN(p.lat) 
+          ? Number(p.lat) 
+          : (p.y != null && !isNaN(p.y) ? 24.4686 + (Number(p.y) - 2703800) / 110000 : 24.4686);
+        const lng = p.lng != null && !isNaN(p.lng) 
+          ? Number(p.lng) 
+          : (p.x != null && !isNaN(p.x) ? 39.6120 + (Number(p.x) - 582500) / 100000 : 39.6120);
+
+        const utmE = p.x != null && !isNaN(p.x) 
+          ? Math.round(Number(p.x)) 
+          : Math.round(582500 + (lng - 39.6120) * 100000);
+        const utmN = p.y != null && !isNaN(p.y) 
+          ? Math.round(Number(p.y)) 
+          : Math.round(2703800 + (lat - 24.4686) * 110000);
+
+        const nodeLabel = language === 'ar' ? (labelsAr[idx] || `نقطة ${idx + 1}`) : (labelsEn[idx] || `Point ${idx + 1}`);
+        return `${nodeLabel}: E ${utmE}, N ${utmN} | Lat ${lat.toFixed(6)}° N, Lng ${lng.toFixed(6)}° E`;
       }).join('\n');
+
       if (formData.coordinates !== coordString) {
         setFormData(prev => ({ ...prev, coordinates: coordString }));
       }
       
       const calculatedLength = getWorkZoneLengthFromCoords();
-      if (calculatedLength !== formData.siteLength) {
+      if (calculatedLength && calculatedLength !== formData.siteLength) {
         setFormData(prev => ({ ...prev, siteLength: calculatedLength }));
       }
     } else {
@@ -2814,7 +2868,7 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
         setFormData(prev => ({ ...prev, coordinates: '' }));
       }
     }
-  }, [boundaryPoints]);
+  }, [boundaryPoints, language]);
 
 
   // Sync detailedTimeline when milestones change
@@ -3033,14 +3087,6 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     setCurrentPhase(prev => Math.min(prev + 1, 3));
   };
   const prevPhase = () => setCurrentPhase(prev => Math.max(prev - 1, 1));
-
-  // Auto-sync boundaryPoints to formData.coordinates string
-  useEffect(() => {
-    if (boundaryPoints && boundaryPoints.length > 0) {
-      const formatted = boundaryPoints.map(p => `E ${p.x}, N ${p.y}`).join('\n');
-      setFormData(prev => ({ ...prev, coordinates: formatted }));
-    }
-  }, [boundaryPoints]);
 
   // Helper to download contractor's uploaded CAD blueprint file
   const downloadUploadedCadFile = (customPermit = null) => {
@@ -3918,7 +3964,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   <span>{language === 'ar' ? '🗺️ المخطط الهندسي التفاعلي للتحويلة ونطاق العمل على القمر الصناعي (CAD GIS Blueprint)' : '🗺️ Interactive CAD Detour & Work Zone Satellite Blueprint'}</span>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] font-mono">
-                  <span className="bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/50">4K Sub-Meter HD</span>
                   <span className="bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800/50">WGS84 UTM</span>
                 </div>
               </div>
@@ -3988,7 +4033,21 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs space-y-2">
                 <div>
                   <span className="font-bold text-slate-700">{language === 'ar' ? 'إحداثيات مضلع حدود التحويلة بنظام UTM-WGS84:' : 'WGS84 UTM Coordinate Boundary Polygon:'} </span>
-                  <code className="text-slate-800 break-all bg-slate-200/50 p-1 rounded font-mono" dir="ltr">{formData.coordinates || 'No boundary drawn'}</code>
+                  <div className="mt-1.5 p-2.5 bg-slate-100/90 rounded-lg border border-slate-200 font-mono text-slate-800 text-[11px] leading-relaxed whitespace-pre-line" dir="ltr">
+                    {formData.coordinates && !formData.coordinates.includes('undefined')
+                      ? formData.coordinates
+                      : (boundaryPoints && boundaryPoints.length > 0
+                          ? boundaryPoints.map((p, idx) => {
+                              const lat = p.lat != null && !isNaN(p.lat) ? Number(p.lat) : 24.4686;
+                              const lng = p.lng != null && !isNaN(p.lng) ? Number(p.lng) : 39.6120;
+                              const utmE = p.x != null && !isNaN(p.x) ? Math.round(Number(p.x)) : Math.round(582500 + (lng - 39.6120) * 100000);
+                              const utmN = p.y != null && !isNaN(p.y) ? Math.round(Number(p.y)) : Math.round(2703800 + (lat - 24.4686) * 110000);
+                              return `N${idx + 1}: E ${utmE}, N ${utmN} | Lat ${lat.toFixed(6)}° N, Lng ${lng.toFixed(6)}° E`;
+                            }).join('\n')
+                          : (formData.siteLat && formData.siteLng
+                              ? `N1: E ${Math.round(582500 + (Number(formData.siteLng) - 39.6120) * 100000)}, N ${Math.round(2703800 + (Number(formData.siteLat) - 24.4686) * 110000)} | Lat ${Number(formData.siteLat).toFixed(6)}° N, Lng ${Number(formData.siteLng).toFixed(6)}° E`
+                              : 'N1 (Detour Site): E 582500, N 2703800 | Lat 24.468600° N, Lng 39.612000° E (Al-Madinah)'))}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-200">
                   <div><span className="font-bold text-slate-700">{t.stagingArea}:</span> {language === 'ar' ? formData.stagingAreaAr : formData.stagingAreaEn}</div>
@@ -4465,16 +4524,22 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           onChange={handleInputChange}
                           onSelect={(result) => {
                             if (result && result.lat && result.lng) {
+                              const lat = Number(result.lat);
+                              const lng = Number(result.lng);
+                              const x = Math.round(582500 + (lng - 39.6120) * 100000);
+                              const y = Math.round(2703800 + (lat - 24.4686) * 110000);
                               setBoundaryPoints([{ 
-                                lat: result.lat, 
-                                lng: result.lng, 
+                                lat, 
+                                lng, 
+                                x,
+                                y,
                                 id: Date.now() 
                               }]);
                               setFormData(prev => ({
                                 ...prev,
-                                siteLat: result.lat,
-                                siteLng: result.lng,
-                                roadCoordinates: { lat: result.lat, lng: result.lng },
+                                siteLat: lat,
+                                siteLng: lng,
+                                roadCoordinates: { lat, lng },
                                 locationAr: prev.locationAr || result.displayName || result.name,
                                 locationEn: prev.locationEn || result.name
                               }));
