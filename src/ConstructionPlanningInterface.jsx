@@ -692,13 +692,33 @@ const ReportSatelliteMapView = ({ permit, language = 'ar' }) => {
 };
 
 const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
-  // ── TEMPORARY DEV BYPASS ──
-  // Set to true to skip phase-navigation completeness checks AND the
-  // submission-blocking validation gate, so you can click through the app
-  // without filling every required field. Set back to false before any
-  // real demo/handoff, since it disables the validation the standard
-  // will expect to see working.
-  const DEV_SKIP_VALIDATION = false;
+  // ── DEV MODE VALIDATION BYPASS ──
+  const [devModeActive, setDevModeActive] = useState(() => {
+    try {
+      return localStorage.getItem('amanah_dev_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleDevMode = () => {
+    setDevModeActive(prev => {
+      const nextVal = !prev;
+      try {
+        localStorage.setItem('amanah_dev_mode', nextVal.toString());
+      } catch {}
+      setToastNotification({
+        type: nextVal ? 'warning' : 'info',
+        title: nextVal 
+          ? (language === 'ar' ? '⚡ تم تفعيل وضع المطور (Dev Mode)' : '⚡ Dev Mode Activated') 
+          : (language === 'ar' ? '🛡️ تم تفعيل التحقق القياسي' : '🛡️ Standard Validation Active'),
+        text: nextVal 
+          ? (language === 'ar' ? 'يمكنك الآن تخطي جميع الشروط الإلزامية واختبار كافة المراحل بحرية.' : 'All mandatory validation rules bypassed for rapid system testing.')
+          : (language === 'ar' ? 'تمت إعادة فرض الشروط والمعايير الهندسية لكود الطرق ٣٠٥.' : 'Saudi Road Code 305 validation rules re-enforced.')
+      });
+      return nextVal;
+    });
+  };
 
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -1349,7 +1369,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     }
     if (panelName === 'p3_auditor') {
       if (formData.includePedestrianPath !== false) {
-        return !!(language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn);
+        return Boolean(formData.trenchPlatesType && formData.trenchPlatesType !== '');
       }
       return true;
     }
@@ -1357,7 +1377,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
   };
 
   const isPhaseComplete = (phase) => {
-    if (DEV_SKIP_VALIDATION) return true;
+    if (devModeActive) return true;
     if (phase === 1) {
       return isPanelComplete('p1_general') && isPanelComplete('p1_roadwork') && isPanelComplete('p1_gantt');
     }
@@ -3123,14 +3143,14 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
     if (formData.includePedestrianPath !== false && isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && !formData.pedestrianPathProvided) {
       issues.push(language === 'ar' ? 'طول التحويلة يتجاوز 400م ولم يتم تأكيد توفير ممر مشاة.' : 'Diversion length exceeds 400m and a pedestrian path has not been confirmed.');
     }
-    if (formData.includePedestrianPath !== false && !(language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn)) {
-      issues.push(language === 'ar' ? 'مواصفات وتأمين معابر المشاة في البند ٣.٢ غير مكتملة.' : 'Pedestrian crossing & safety specifications in Section 3.2 are missing.');
+    if (formData.includePedestrianPath !== false && (!formData.trenchPlatesType || formData.trenchPlatesType === '')) {
+      issues.push(language === 'ar' ? 'يرجى تحديد نوع غطاء أو جسور خنادق المشاة/المركبات في البند ٣.٢.' : 'Please select the trench crossing/covering type in Section 3.2.');
     }
     return issues;
   };
 
   const submitContractorForm = async () => {
-    const blockingIssues = DEV_SKIP_VALIDATION ? [] : getSubmissionBlockingIssues();
+    const blockingIssues = devModeActive ? [] : getSubmissionBlockingIssues();
     if (blockingIssues.length > 0) {
       setAttemptedStages({ 1: true, 2: true, 3: true });
       showToast(
@@ -4264,6 +4284,21 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   <span className="text-[10px] hidden sm:inline">{language === 'ar' ? 'خروج' : 'Logout'}</span>
                 </button>
               </div>
+
+              {/* Dev Mode Validation Bypass Toggle */}
+              <button 
+                type="button"
+                onClick={toggleDevMode}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow cursor-pointer border ${
+                  devModeActive 
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold ring-2 ring-amber-300/50 animate-pulse' 
+                    : 'bg-brand-dark-hover/40 hover:bg-brand-dark-hover/70 text-slate-300 border-brand-gold/30'
+                }`}
+                title={language === 'ar' ? 'تفعيل/تعطيل وضع المطور لتجاوز متطلبات الانتقال والاعتماد للاختبار السريع' : 'Toggle Dev Mode to bypass validation requirements for testing'}
+              >
+                <span>⚡</span>
+                <span className="hidden sm:inline">{language === 'ar' ? (devModeActive ? 'وضع المطور: نشط' : 'وضع المطور') : (devModeActive ? 'DEV MODE: ON' : 'DEV MODE')}</span>
+              </button>
 
               <button 
                 onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
@@ -5540,12 +5575,26 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         )}
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'غطاء أو جسور خنادق المشاة والمركبات' : 'Trench Steel Plates / Crossings'}</label>
-                        <select name="trenchPlatesType" value={formData.trenchPlatesType} onChange={handleInputChange} className="w-full mt-2 border border-slate-300 rounded p-2 text-xs">
-                          <option value="none">{language === 'ar' ? 'لا يوجد (بدون خنادق مفتوحة)' : 'None (No Open Trenches)'}</option>
-                          <option value="steel_40t">{language === 'ar' ? 'ألواح صلب سماكة ٣٠ ملم - ٤٠ طن' : '30mm Steel Plates - 40 Tonnes'}</option>
-                          <option value="anti_skid">{language === 'ar' ? 'ألواح مانعة للانزلاق (للمشاة)' : 'Anti-Skid Trench Covers'}</option>
+                        {renderFieldHeader(
+                          language === 'ar' ? 'غطاء أو جسور خنادق المشاة والمركبات' : 'Trench Steel Plates / Crossings',
+                          'trenchPlatesType',
+                          formData.includePedestrianPath !== false,
+                          3
+                        )}
+                        <select 
+                          name="trenchPlatesType" 
+                          value={formData.trenchPlatesType} 
+                          onChange={handleInputChange} 
+                          className={getFieldInputClass('trenchPlatesType', formData.includePedestrianPath !== false, 'mt-1', 3)}
+                        >
+                          <option value="">{language === 'ar' ? '-- اختر نوع تغطية الخنادق والجسور والمعابر * --' : '-- Select Trench Covering & Crossings Type * --'}</option>
+                          <option value="none">{language === 'ar' ? 'لا يوجد (بدون خنادق مفتوحة أو معابر)' : 'None (No Open Trenches or Crossings)'}</option>
                           <option value="pedestrian">{language === 'ar' ? 'جسور مشاة حديدية مع درابزين حماية' : 'Pedestrian Iron Bridges with Handrails'}</option>
+                          <option value="anti_skid">{language === 'ar' ? 'ألواح مانعة للانزلاق (معابر مشاة)' : 'Anti-Skid Pedestrian Trench Covers'}</option>
+                          <option value="steel_40t">{language === 'ar' ? 'ألواح صلب سماكة ٣٠ ملم - ٤٠ طن (خنادق مركبات)' : '30mm Heavy Steel Plates (Vehicle Trenches - 40 Tonnes)'}</option>
+                          <option value="multiple_ped_veh">{language === 'ar' ? 'معابر وخنادق متعددة (مشاة + مركبات)' : 'Multiple Crossings (Pedestrian Bridges & Vehicle Steel Plates)'}</option>
+                          <option value="multiple_trenches">{language === 'ar' ? 'خنادق متعددة ممتدة عبر مسار التحويلة' : 'Multiple Trench Crossings along Detour Corridor'}</option>
+                          <option value="custom_engineered">{language === 'ar' ? 'حلول ومعابر خنادق هندسية مخصصة' : 'Custom Engineered Trench Bridges / Covers'}</option>
                         </select>
                       </div>
 
@@ -5579,22 +5628,22 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </div>
                       </div>
 
-                      {/* Pedestrian Crossing & Safe Corridor Specs (Mandatory when pedestrian path is included) */}
+                      {/* Pedestrian Crossing & Safe Corridor Notes (Optional Details) */}
                       {formData.includePedestrianPath !== false && (
                         <div className="bg-gradient-to-r from-emerald-50/90 to-teal-50/50 border border-emerald-300 rounded-xl p-4 space-y-2 shadow-xs animate-fade-in">
                           <div className="flex items-center justify-between flex-wrap gap-2">
                             <label className="block text-xs font-bold text-emerald-950 uppercase flex items-center gap-1.5">
                               <span>🚶</span>
-                              <span>{language === 'ar' ? 'مواصفات وتأمين معابر وممرات المشاة (PEDESTRIAN CROSSING & SAFE CORRIDOR SPECS) *' : 'PEDESTRIAN CROSSING & SAFE CORRIDOR SPECS *'}</span>
+                              <span>{language === 'ar' ? 'مواصفات وتأمين معابر وممرات المشاة' : 'PEDESTRIAN CROSSING & SAFE CORRIDOR SPECS'}</span>
                             </label>
-                            <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2.5 py-0.5 rounded-full border border-emerald-300">
-                              {language === 'ar' ? 'إلزامي للتحويلات المشتملة على مسار مشاة' : 'Mandatory for Pedestrian Route'}
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                              {language === 'ar' ? 'ملاحظات إضافية (اختياري)' : 'Additional Notes (Optional)'}
                             </span>
                           </div>
                           {renderFieldHeader(
-                            language === 'ar' ? 'تفاصيل ومعايير تأمين معبر وممر المشاة' : 'Pedestrian Crossing & Safety Details',
+                            language === 'ar' ? 'تفاصيل وملاحظات تأمين معبر وممر المشاة (اختياري)' : 'Pedestrian Crossing & Safety Details (Optional)',
                             language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn',
-                            true,
+                            false,
                             3
                           )}
                           <textarea
@@ -5602,10 +5651,10 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             name={language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn'}
                             value={language === 'ar' ? formData.pedestrianCrossingSpecsAr : formData.pedestrianCrossingSpecsEn}
                             onChange={handleInputChange}
-                            placeholder={language === 'ar' ? 'حدد مسارات ومواصفات حماية معابر المشاة، الحواجز العازلة، المنحدرات لذوي الإعاقة، وإشارات العبور...' : 'Specify pedestrian crossing corridors, safety fencing, ADA ramps, and tactile/warning signs...'}
+                            placeholder={language === 'ar' ? 'حدد مسارات ومواصفات حماية معابر المشاة، الحواجز العازلة، المنحدرات لذوي الإعاقة، وإشارات العبور (اختياري)...' : 'Specify pedestrian crossing corridors, safety fencing, ADA ramps, and tactile/warning signs (optional)...'}
                             className={getFieldInputClass(
                               language === 'ar' ? 'pedestrianCrossingSpecsAr' : 'pedestrianCrossingSpecsEn',
-                              true,
+                              false,
                               'bg-white text-slate-800 focus:ring-2 focus:ring-emerald-400',
                               3
                             )}
