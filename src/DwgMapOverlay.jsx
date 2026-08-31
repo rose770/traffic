@@ -547,7 +547,7 @@ const DwgMapOverlay = ({
   const [showControlNodes, setShowControlNodes] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [selectedEditFeatureIdx, setSelectedEditFeatureIdx] = useState(null);
-  const [showKeymapSidebar, setShowKeymapSidebar] = useState(true);
+  const [showKeymapSidebar, setShowKeymapSidebar] = useState(false);
 
   // ── Multi-Layer Interactive Site Drawing State ──
   const [isMultiLayerDrawingMode, setIsMultiLayerDrawingMode] = useState(false);
@@ -619,6 +619,13 @@ const DwgMapOverlay = ({
       handleStartDirectDrawing();
     }
   }, [autoStartDirectDrawing, isMapActive, handleStartDirectDrawing]);
+
+  // Auto-center map whenever anchor coordinates change (e.g., road name selected in Stage 1)
+  useEffect(() => {
+    if (mapInstanceRef.current && anchorLat && anchorLng) {
+      mapInstanceRef.current.setView([anchorLat, anchorLng], 18, { animate: true });
+    }
+  }, [anchorLat, anchorLng]);
 
   // Auto-resize Leaflet map smoothly when Keymap Sidebar is collapsed or expanded
   useEffect(() => {
@@ -2629,9 +2636,6 @@ const DwgMapOverlay = ({
                     <span>📐 {dwgData.fileName}</span>
                     <span className="text-slate-500">•</span>
                     <span>{dwgData.totalFeatures || dwgData.geojson?.features?.length || 0} {isAr ? 'عنصر' : 'features'}</span>
-                    <span className="text-emerald-400 text-[10px] bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-800/40">
-                      ⚡ 4K Clarity
-                    </span>
                   </span>
                 )}
 
@@ -2661,21 +2665,28 @@ const DwgMapOverlay = ({
                   <span>{isAr ? 'استيراد كاد 📁' : 'Import CAD 📁'}</span>
                 </button>
 
-                {/* ✏️ MULTI-LAYER SITE DRAWING TOOL TOGGLE */}
+                {/* ✏️ MERGED: MULTI-LAYER SITE DRAWING & CONTROL NODES TOGGLE */}
                 <button
                   type="button"
                   onClick={() => {
-                    setIsMultiLayerDrawingMode(!isMultiLayerDrawingMode);
+                    const next = !(isMultiLayerDrawingMode || showControlNodes);
+                    setIsMultiLayerDrawingMode(next);
+                    setShowControlNodes(next);
+                    if (!next) setSelectedEditFeatureIdx(null);
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
-                    isMultiLayerDrawingMode
+                    (isMultiLayerDrawingMode || showControlNodes)
                       ? 'bg-gradient-to-r from-amber-600 via-red-600 to-emerald-600 text-white border-amber-400 ring-2 ring-amber-400/40 animate-pulse'
                       : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
                   }`}
-                  title={isAr ? 'رسم حدود الموقع (أصفر)، مسار التحويلة (أحمر)، وممر المشاة (أخضر)' : 'Multi-layer drawing: Site (Yellow), Transition (Red), Pedestrian (Green)'}
+                  title={isAr ? 'أدوات الرسم الهندسي المتعدد وعُقد التحكم بالمسارات' : 'Multi-layer CAD drawing & control nodes editor'}
                 >
                   <PenTool className="h-3.5 w-3.5 text-amber-300" />
-                  <span>{isAr ? (isMultiLayerDrawingMode ? 'أداة الرسم نشطة ✏️' : 'أداة الرسم الهندسي ✏️') : (isMultiLayerDrawingMode ? 'Drawing Active ✏️' : 'CAD Drawing Tool ✏️')}</span>
+                  <span>
+                    {isAr
+                      ? ((isMultiLayerDrawingMode || showControlNodes) ? 'الرسم وعُقد التحكم نشطة ✏️' : 'أداة الرسم والتحكم ✏️')
+                      : ((isMultiLayerDrawingMode || showControlNodes) ? 'Drawing & Nodes Active ✏️' : 'Drawing & Control Nodes ✏️')}
+                  </span>
                 </button>
 
                 {/* 🛡️ EXPORT WATERMARKED SIGNED CAD BUTTON */}
@@ -2748,21 +2759,6 @@ const DwgMapOverlay = ({
                   <span>{isAr ? (showLabels ? 'إخفاء التسميات 🏷️' : 'إظهار التسميات 🏷️') : (showLabels ? 'Hide Labels 🏷️' : 'Show Labels 🏷️')}</span>
                 </button>
 
-                {/* 🔵 6-NODE CONTROL NODES EDITOR TOGGLE */}
-                <button
-                  type="button"
-                  onClick={() => { setShowControlNodes(!showControlNodes); if (showControlNodes) setSelectedEditFeatureIdx(null); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
-                    showControlNodes
-                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white border-blue-400 ring-2 ring-blue-400/40'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
-                  }`}
-                  title={isAr ? 'إظهار 6 عُقد تحكم على الخطوط الحمراء والصفراء والزرقاء لتعديل المسار بدقة' : 'Show 6 control nodes on Red, Yellow, Blue lines for editing'}
-                >
-                  <Target className="h-3.5 w-3.5 text-blue-300" />
-                  <span>{isAr ? 'عُقد التحكم ⬡' : 'Control Nodes ⬡'}</span>
-                </button>
-
                 {/* ↶ REVERT (UNDO) & ↷ FORWARD (REDO) BUTTONS */}
                 <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl p-1 shadow">
                   <button
@@ -2798,35 +2794,17 @@ const DwgMapOverlay = ({
                   </button>
                 </div>
 
-                {/* ➕ ADD ADDITIONAL CAD FILE BUTTON */}
-                <button
-                  type="button"
-                  onClick={() => additionalFileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95"
-                  title={isAr ? 'إضافة ملف أوتوكاد إضافي للتحويلة أو الخدمات' : 'Upload additional CAD overlay'}
-                >
-                  <Plus className="h-3.5 w-3.5 text-purple-200" />
-                  <span>{isAr ? 'إضافة مخطط آخر' : 'Add CAD File'}</span>
-                </button>
-
                 {/* Snap to Site / Fly to Site */}
                 <button
                   type="button"
                   onClick={() => {
                     if (!mapInstanceRef.current) return;
                     mapInstanceRef.current.invalidateSize();
-                    if (geoJsonLayerRef.current) {
-                      const bounds = geoJsonLayerRef.current.getBounds();
-                      if (bounds && bounds.isValid()) {
-                        mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 18, animate: true });
-                        return;
-                      }
-                    }
-                    if (dwgData?.centerLatLng) {
-                      mapInstanceRef.current.flyTo(dwgData.centerLatLng, 18, { animate: true });
-                    }
+                    const targetLat = anchorLat || dwgData?.centerLatLng?.[0] || 24.4686;
+                    const targetLng = anchorLng || dwgData?.centerLatLng?.[1] || 39.6120;
+                    mapInstanceRef.current.flyTo([targetLat, targetLng], 18, { animate: true });
                   }}
-                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95"
+                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 cursor-pointer"
                   title={isAr ? 'انتقال فوري لموقع مشروع التحويلة على الخريطة' : 'Fly directly to construction site'}
                 >
                   <MapPin className="h-3.5 w-3.5 text-amber-300" />
@@ -2856,15 +2834,6 @@ const DwgMapOverlay = ({
                 >
                   <Sliders className="h-3.5 w-3.5 text-brand-gold" />
                   <span>{isAr ? 'الإزاحة والتدوير' : 'Nudge & Rotate'}</span>
-                </button>
-
-                {/* Upload/Replace CAD */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition"
-                >
-                  {isAr ? 'استبدال الرئيسي' : 'Replace Main'}
                 </button>
 
                 {/* Reset */}
@@ -3238,8 +3207,27 @@ const DwgMapOverlay = ({
 
                 <button
                   type="button"
+                  onClick={() => {
+                    const next = !(isMultiLayerDrawingMode || showControlNodes);
+                    setIsMultiLayerDrawingMode(next);
+                    setShowControlNodes(next);
+                    if (!next) setSelectedEditFeatureIdx(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
+                    (isMultiLayerDrawingMode || showControlNodes)
+                      ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
+                      : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'
+                  }`}
+                  title={isAr ? 'إظهار/إخفاء لوحة وأدوات الرسم الهندسي المتعدد' : 'Toggle Multi-Layer CAD Drawing Menu'}
+                >
+                  <PenTool className="h-3.5 w-3.5 text-brand-gold" />
+                  <span>{isAr ? 'لوحة الرسم الهندسي ✏️' : 'CAD Drawing Menu ✏️'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setShowPalette(!showPalette)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
                     showPalette
                       ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
                       : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'

@@ -4481,17 +4481,20 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           value={language === 'ar' ? formData.roadNameAr : formData.roadNameEn}
                           onChange={handleInputChange}
                           onSelect={(result) => {
-                            // Automatically center map and add a boundary point
                             if (result && result.lat && result.lng) {
                               setBoundaryPoints([{ 
                                 lat: result.lat, 
                                 lng: result.lng, 
                                 id: Date.now() 
                               }]);
-                              // Pan map if instance exists
-                              if (window.L && document.getElementById('map-container')) {
-                                // Map re-centering is handled by map bounds effect, but we can't easily reach map instance from here without ref
-                              }
+                              setFormData(prev => ({
+                                ...prev,
+                                siteLat: result.lat,
+                                siteLng: result.lng,
+                                roadCoordinates: { lat: result.lat, lng: result.lng },
+                                locationAr: prev.locationAr || result.displayName || result.name,
+                                locationEn: prev.locationEn || result.name
+                              }));
                             }
                           }}
                         />
@@ -5096,8 +5099,8 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       <DwgMapOverlay
                         language={language}
                         onPlacementsChange={handleDwgPlacementsChange}
-                        anchorLat={sharedDwgData?.centerLatLng?.[0] || 24.4686}
-                        anchorLng={sharedDwgData?.centerLatLng?.[1] || 39.6120}
+                        anchorLat={formData.siteLat || boundaryPoints?.[0]?.lat || sharedDwgData?.centerLatLng?.[0] || 24.4686}
+                        anchorLng={formData.siteLng || boundaryPoints?.[0]?.lng || sharedDwgData?.centerLatLng?.[1] || 39.6120}
                         roadName={formData.roadNameAr || formData.roadNameEn}
                         preloadedDwgData={sharedDwgData}
                         autoStartDirectDrawing={directDrawingTrigger}
