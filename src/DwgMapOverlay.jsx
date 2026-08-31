@@ -548,15 +548,18 @@ const DwgMapOverlay = ({
   const [showLabels, setShowLabels] = useState(false);
   const [selectedEditFeatureIdx, setSelectedEditFeatureIdx] = useState(null);
   const [showKeymapSidebar, setShowKeymapSidebar] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState('keymap'); // 'keymap' | 'drawing' | 'signs'
 
   // ── Multi-Layer Interactive Site Drawing State ──
   const [isMultiLayerDrawingMode, setIsMultiLayerDrawingMode] = useState(false);
-  const [activeDrawingLayer, setActiveDrawingLayer] = useState('site'); // 'site' (Yellow 🟡) | 'transition' (Red 🔴) | 'barrier' (Cyan 🧱) | 'pedestrian' (Green 🟢)
+  const [activeDrawingLayer, setActiveDrawingLayer] = useState('site'); // 'site' | 'transition' | 'barrier' | 'pedestrian' | 'labels'
   const [drawnSiteNodes, setDrawnSiteNodes] = useState([]); // Yellow Polygon (Work Zone Site)
   const [drawnTransitionNodes, setDrawnTransitionNodes] = useState([]); // Red Polyline (Detour Transition Taper)
   const [drawnBarrierNodes, setDrawnBarrierNodes] = useState([]); // Cyan Polyline (Continuous NJB Barrier Wall / Repeating Signs)
   const [selectedBarrierType, setSelectedBarrierType] = useState('concrete_njb'); // 'concrete_njb' | 'plastic_njb' | 'cones_series' | 'warning_lights_chain'
   const [drawnPedestrianNodes, setDrawnPedestrianNodes] = useState([]); // Green Polyline (Safe Pedestrian Route - Optional)
+  const [customTextLabels, setCustomTextLabels] = useState([]); // Custom User Placed Text Annotations & Callouts
+  const [newLabelText, setNewLabelText] = useState(''); // Text input for next placed label
   const drawingLayerRef = useRef(null);
 
   // ── CAD Versioning & Watermarking State ──
@@ -585,6 +588,13 @@ const DwgMapOverlay = ({
 
   const [isDirectDrawingActive, setIsDirectDrawingActive] = useState(false);
   const isMapActive = uploadStatus === 'done' || dwgData !== null || isDirectDrawingActive;
+  const hasImportedCad = Boolean(
+    dwgData && 
+    fileName && 
+    fileName !== 'Direct_Site_Plan.dxf' && 
+    dwgData?.fileName !== 'Direct_Site_Plan.dxf' && 
+    dwgData?.geojson?.features?.length > 0
+  );
 
   // Direct Interactive Drawing Handler (Start with 0 Uploads)
   const handleStartDirectDrawing = useCallback(() => {
@@ -708,6 +718,20 @@ const DwgMapOverlay = ({
           const nextIdx = prev.length + 1;
           return [...prev, { id: `P${nextIdx}`, lat, lng, x: utmX, y: utmN }];
         });
+      } else if (activeDrawingLayer === 'labels') {
+        const textToPlace = (newLabelText || '').trim() || (isAr ? `تسمية ${customTextLabels.length + 1}` : `Label ${customTextLabels.length + 1}`);
+        setCustomTextLabels(prev => [
+          ...prev, 
+          { 
+            id: `LBL_${Date.now()}`, 
+            text: textToPlace, 
+            lat, 
+            lng, 
+            x: utmX, 
+            y: utmN,
+            color: '#38bdf8'
+          }
+        ]);
       }
     };
 
@@ -715,9 +739,9 @@ const DwgMapOverlay = ({
     return () => {
       map.off('click', handleCanvasClick);
     };
-  }, [isMultiLayerDrawingMode, activeDrawingLayer, anchorLat, anchorLng]);
+  }, [isMultiLayerDrawingMode, activeDrawingLayer, newLabelText, customTextLabels.length, anchorLat, anchorLng, isAr]);
 
-  // ── Render Multi-Layer Drawing (Yellow Site, Red Detour, Cyan Barrier, Green Pedestrian) ──
+  // ── Render Multi-Layer Drawing (Yellow Site, Red Detour, Cyan Barrier, Green Pedestrian, Custom Labels) ──
   useEffect(() => {
     if (!mapInstanceRef.current || !window.L) return;
 
@@ -726,7 +750,7 @@ const DwgMapOverlay = ({
       drawingLayerRef.current = null;
     }
 
-    const hasAnyDrawn = drawnSiteNodes.length > 0 || drawnTransitionNodes.length > 0 || drawnBarrierNodes.length > 0 || drawnPedestrianNodes.length > 0;
+    const hasAnyDrawn = drawnSiteNodes.length > 0 || drawnTransitionNodes.length > 0 || drawnBarrierNodes.length > 0 || drawnPedestrianNodes.length > 0 || customTextLabels.length > 0;
     if (!isMultiLayerDrawingMode && !hasAnyDrawn) return;
 
     const lg = window.L.layerGroup().addTo(mapInstanceRef.current);
@@ -849,7 +873,79 @@ const DwgMapOverlay = ({
         dashArray: '4, 4'
       }).addTo(lg);
     }
-  }, [isMultiLayerDrawingMode, drawnSiteNodes, drawnTransitionNodes, drawnBarrierNodes, drawnPedestrianNodes, anchorLat, anchorLng, isAr]);
+
+    // 5. Render Custom Text Labels (Cyan / Gold Callouts)
+    customTextLabels.forEach((lbl, idx) => {
+      const labelIcon = window.L.divIcon({
+        className: 'cad-custom-text-label',
+        html: `<div style="
+          background: rgba(15, 23, 42, 0.95);
+          color: #38bdf8;
+          border: 1.5px solid #0284c7;
+          border-radius: 8px;
+          padding: 3px 8px;
+          font-weight: bold;
+          font-size: 11px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          cursor: pointer;
+        ">
+          <span style="font-size: 12px;">🏷️</span>
+          <span>${lbl.text}</span>
+        </div>`,
+        iconAnchor: [12, 12]
+      });
+
+      const labelMarker = window.L.marker([lbl.lat, lbl.lng], {
+        draggable: true,
+        pane: 'cadMarkerPane',
+        icon: labelIcon
+      });
+
+      labelMarker.on('dragend', (e) => {
+        const { lat, lng } = e.target.getLatLng();
+        setCustomTextLabels(prev => {
+          const u = [...prev];
+          if (u[idx]) {
+            u[idx] = {
+              ...u[idx],
+              lat,
+              lng,
+              x: Math.round(582500 + (lng - anchorLng) * 100000),
+              y: Math.round(2703800 + (lat - anchorLat) * 110000)
+            };
+          }
+          return u;
+        });
+      });
+
+      const popupContent = `
+        <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 4px; direction: ${isAr ? 'rtl' : 'ltr'}; text-align: center;">
+          <div style="font-weight:bold; color:#38bdf8; margin-bottom:3px;">🏷️ ${lbl.text}</div>
+          <div style="color:#94a3b8; font-size:9.5px; font-family:monospace; margin-bottom:6px;">E: ${lbl.x}م | N: ${lbl.y}م</div>
+          <button id="del-label-${lbl.id}" style="background:#ef4444; color:white; border:none; border-radius:6px; padding:4px 8px; font-size:10px; font-weight:bold; cursor:pointer; width:100%;">
+            🗑️ ${isAr ? 'حذف التسمية' : 'Delete Label'}
+          </button>
+        </div>
+      `;
+      labelMarker.bindPopup(popupContent);
+      labelMarker.on('popupopen', () => {
+        const btn = document.getElementById(`del-label-${lbl.id}`);
+        if (btn) {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            setCustomTextLabels(prev => prev.filter(item => item.id !== lbl.id));
+            if (mapInstanceRef.current) mapInstanceRef.current.closePopup();
+          };
+        }
+      });
+
+      labelMarker.addTo(lg);
+    });
+  }, [isMultiLayerDrawingMode, drawnSiteNodes, drawnTransitionNodes, drawnBarrierNodes, drawnPedestrianNodes, customTextLabels, anchorLat, anchorLng, isAr]);
 
   // Undo / Revert Last Placed Point on Active Drawing Layer
   const handleUndoLastPoint = () => {
@@ -1262,24 +1358,52 @@ const DwgMapOverlay = ({
 
   // ── 3. Smart Auto-Alignment Trigger ──
   const handleSmartAutoAlign = useCallback(() => {
-    if (!dwgData) return;
-    if (dwgData.autoAlignment?.hasControlPoints) {
-      const { dLat, dLng, rotationDeg } = dwgData.autoAlignment;
-      const originLat = dwgData.centerLatLng ? dwgData.centerLatLng[0] : anchorLat;
-      const metersY = dLat * 110574.61;
-      const metersX = dLng * (111320 * Math.cos(originLat * Math.PI / 180));
+    if (hasImportedCad) {
+      if (dwgData?.autoAlignment?.hasControlPoints) {
+        const { dLat, dLng, rotationDeg } = dwgData.autoAlignment;
+        const originLat = dwgData.centerLatLng ? dwgData.centerLatLng[0] : anchorLat;
+        const metersY = dLat * 110574.61;
+        const metersX = dLng * (111320 * Math.cos(originLat * Math.PI / 180));
 
-      if (Math.abs(metersX) < 100 && Math.abs(metersY) < 100) {
-        setAlignOffsetX(Number(metersX.toFixed(2)));
-        setAlignOffsetY(Number(metersY.toFixed(2)));
-        setCadRotationDeg(rotationDeg || 0);
+        if (Math.abs(metersX) < 100 && Math.abs(metersY) < 100) {
+          setAlignOffsetX(Number(metersX.toFixed(2)));
+          setAlignOffsetY(Number(metersY.toFixed(2)));
+          setCadRotationDeg(rotationDeg || 0);
+        }
+      } else {
+        setAlignOffsetX(0);
+        setAlignOffsetY(0);
+        setCadRotationDeg(0);
       }
     } else {
-      setAlignOffsetX(0);
-      setAlignOffsetY(0);
-      setCadRotationDeg(0);
+      // ── SNAP DRAWN CONTROL NODES TO STREET AXIS (Drawing Mode) ──
+      const centerLat = anchorLat || 24.4686;
+      const centerLng = anchorLng || 39.6120;
+      const cosLat = Math.cos(centerLat * Math.PI / 180);
+      
+      // Default street orientation angle for Madinah corridors (~40 degrees)
+      const roadAngleRad = (40 * Math.PI) / 180;
+      const halfLenM = 30; // 60m total length
+      const halfWidthM = 6; // 12m width
+      
+      // Vector along road (length) and perpendicular (width)
+      const dxL = (Math.cos(roadAngleRad) * halfLenM) / (111320 * cosLat);
+      const dyL = (Math.sin(roadAngleRad) * halfLenM) / 110574.61;
+      const dxW = (-Math.sin(roadAngleRad) * halfWidthM) / (111320 * cosLat);
+      const dyW = (Math.cos(roadAngleRad) * halfWidthM) / 110574.61;
+
+      const snappedS1 = { id: 'S1', lat: centerLat + dyL + dyW, lng: centerLng + dxL + dxW, x: Math.round(582500 + dxL * 100000), y: Math.round(2703800 + dyL * 110000) };
+      const snappedS2 = { id: 'S2', lat: centerLat + dyL - dyW, lng: centerLng + dxL - dxW, x: Math.round(582500 + dxL * 100000), y: Math.round(2703800 + dyL * 110000) };
+      const snappedS3 = { id: 'S3', lat: centerLat - dyL - dyW, lng: centerLng - dxL - dxW, x: Math.round(582500 - dxL * 100000), y: Math.round(2703800 - dyL * 110000) };
+      const snappedS4 = { id: 'S4', lat: centerLat - dyL + dyW, lng: centerLng - dxL + dxW, x: Math.round(582500 - dxL * 100000), y: Math.round(2703800 - dyL * 110000) };
+
+      setDrawnSiteNodes([snappedS1, snappedS2, snappedS3, snappedS4]);
+      setShowControlNodes(true);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.setView([centerLat, centerLng], 18, { animate: true });
+      }
     }
-  }, [dwgData, anchorLat]);
+  }, [hasImportedCad, dwgData, anchorLat, anchorLng]);
 
   // ── 4. Render CAD Drawing & Additional Files ──
   useEffect(() => {
@@ -2654,41 +2778,6 @@ const DwgMapOverlay = ({
 
               {/* Right Group: Action Buttons */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* 📁 IMPORT / OVERLAY CAD BLUEPRINT BUTTON */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border border-slate-700 cursor-pointer"
-                  title={isAr ? 'استيراد أو استبدال ملف كاد (DWG / DXF)' : 'Import or replace CAD file (DWG / DXF)'}
-                >
-                  <Upload className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>{isAr ? 'استيراد كاد 📁' : 'Import CAD 📁'}</span>
-                </button>
-
-                {/* ✏️ MERGED: MULTI-LAYER SITE DRAWING & CONTROL NODES TOGGLE */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !(isMultiLayerDrawingMode || showControlNodes);
-                    setIsMultiLayerDrawingMode(next);
-                    setShowControlNodes(next);
-                    if (!next) setSelectedEditFeatureIdx(null);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
-                    (isMultiLayerDrawingMode || showControlNodes)
-                      ? 'bg-gradient-to-r from-amber-600 via-red-600 to-emerald-600 text-white border-amber-400 ring-2 ring-amber-400/40 animate-pulse'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
-                  }`}
-                  title={isAr ? 'أدوات الرسم الهندسي المتعدد وعُقد التحكم بالمسارات' : 'Multi-layer CAD drawing & control nodes editor'}
-                >
-                  <PenTool className="h-3.5 w-3.5 text-amber-300" />
-                  <span>
-                    {isAr
-                      ? ((isMultiLayerDrawingMode || showControlNodes) ? 'الرسم وعُقد التحكم نشطة ✏️' : 'أداة الرسم والتحكم ✏️')
-                      : ((isMultiLayerDrawingMode || showControlNodes) ? 'Drawing & Nodes Active ✏️' : 'Drawing & Control Nodes ✏️')}
-                  </span>
-                </button>
-
                 {/* 🛡️ EXPORT WATERMARKED SIGNED CAD BUTTON */}
                 <button
                   type="button"
@@ -2729,20 +2818,22 @@ const DwgMapOverlay = ({
                   </div>
                 )}
 
-                {/* 🌟 HIGHLIGHT WORKING AREA & ZONES TOGGLE */}
-                <button
-                  type="button"
-                  onClick={() => setShowWorkZoneCorridor(!showWorkZoneCorridor)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
-                    showWorkZoneCorridor
-                      ? 'bg-gradient-to-r from-amber-600 to-red-600 text-white border-amber-400 ring-2 ring-amber-400/40'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
-                  }`}
-                  title={isAr ? 'إبراز وتظليل نطاق منطقة العمل والتحويلة' : 'Toggle Work Zone & Transition Corridor Highlight'}
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-                  <span>{isAr ? 'تظليل نطاق منطقة العمل ✨' : 'Highlight Work Zone ✨'}</span>
-                </button>
+                {/* 🌟 HIGHLIGHT WORKING AREA & ZONES TOGGLE (Imported CAD Only) */}
+                {hasImportedCad && (
+                  <button
+                    type="button"
+                    onClick={() => setShowWorkZoneCorridor(!showWorkZoneCorridor)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
+                      showWorkZoneCorridor
+                        ? 'bg-gradient-to-r from-amber-600 to-red-600 text-white border-amber-400 ring-2 ring-amber-400/40'
+                        : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
+                    }`}
+                    title={isAr ? 'إبراز وتظليل نطاق منطقة العمل والتحويلة' : 'Toggle Work Zone & Transition Corridor Highlight'}
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                    <span>{isAr ? 'تظليل نطاق منطقة العمل ✨' : 'Highlight Work Zone ✨'}</span>
+                  </button>
+                )}
 
                 {/* 🏷️ TOGGLE LABELS & ZONE NAMES */}
                 <button
@@ -2811,36 +2902,38 @@ const DwgMapOverlay = ({
                   <span>{isAr ? 'موقع المشروع 🎯' : 'Site Location 🎯'}</span>
                 </button>
 
-                {/* Smart Auto-Align Button */}
+                {/* Smart Auto-Align Button (Snaps CAD if imported, or snaps drawn control nodes to street axis) */}
                 <button
                   type="button"
                   onClick={handleSmartAutoAlign}
-                  className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95"
-                  title={isAr ? 'محاذاة تلقائية بنقاط الربط المساحية' : 'Snap to ground control points'}
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 cursor-pointer"
+                  title={isAr ? 'محاذاة تلقائية بنقاط الربط أو ضبط نقاط التحكم لمحور الشارع' : 'Snap to ground control points or street axis'}
                 >
                   <Sparkles className="h-3.5 w-3.5 text-amber-300" />
                   <span>{isAr ? 'محاذاة لمحور الشارع' : 'Snap to Street Axis'}</span>
                 </button>
 
-                {/* Fine Alignment Toolbar Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setShowAlignTools(!showAlignTools)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
-                    showAlignTools
-                      ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/30'
-                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
-                  }`}
-                >
-                  <Sliders className="h-3.5 w-3.5 text-brand-gold" />
-                  <span>{isAr ? 'الإزاحة والتدوير' : 'Nudge & Rotate'}</span>
-                </button>
+                {/* Fine Alignment Toolbar Toggle (Imported CAD Only) */}
+                {hasImportedCad && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAlignTools(!showAlignTools)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                      showAlignTools
+                        ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/30'
+                        : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
+                    }`}
+                  >
+                    <Sliders className="h-3.5 w-3.5 text-brand-gold" />
+                    <span>{isAr ? 'الإزاحة والتدوير' : 'Nudge & Rotate'}</span>
+                  </button>
+                )}
 
                 {/* Reset */}
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="text-red-400 hover:text-red-300 font-bold text-xs flex items-center gap-1 px-2.5 py-1.5 bg-red-950/40 border border-red-800/40 rounded-xl transition"
+                  className="text-red-400 hover:text-red-300 font-bold text-xs flex items-center gap-1 px-2.5 py-1.5 bg-red-950/40 border border-red-800/40 rounded-xl transition cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>{isAr ? 'إعادة ضبط' : 'Reset'}</span>
@@ -2995,246 +3088,73 @@ const DwgMapOverlay = ({
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════
-              2. SPLIT-VIEW: MAP VIEWPORT (LEFT) + DOCKED KEYMAP & LAYERS (RIGHT)
+              2. SPLIT-VIEW: MAP VIEWPORT (LEFT) + UNIFIED RIGHT SIDEBAR
           ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
             {/* ── MAP VIEWPORT (8 of 12 cols when sidebar open, 12 of 12 when collapsed) ── */}
             <div className={`${showKeymapSidebar ? 'lg:col-span-8' : 'lg:col-span-12'} relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-950 transition-all duration-300`} style={{ minHeight: '640px' }}>
               <div ref={mapContainerRef} className="absolute inset-0 z-0" />
 
-              {/* Floating Multi-Layer Guided Drawing Mode Assistant Banner */}
-              {isMultiLayerDrawingMode && (
-                <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-950/95 backdrop-blur-md text-white border border-amber-500/80 rounded-2xl p-3.5 shadow-2xl space-y-2.5 animate-in fade-in zoom-in duration-150 text-xs max-w-xl w-[92%] sm:w-full">
-                  {/* Header & Step Selector Tabs */}
-                  <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 flex-wrap">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-200">
-                      <PenTool className="w-4 h-4 text-brand-gold animate-pulse" />
-                      <span>{isAr ? 'أداة التخطيط والرسم المتعدد:' : 'Multi-Layer CAD Drawing Mode:'}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                      {/* Step 1: Site Layer (Yellow 🟡) */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveDrawingLayer('site')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                          activeDrawingLayer === 'site'
-                            ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400/50'
-                            : 'text-amber-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                        <span>{isAr ? `١. الموقع (${drawnSiteNodes.length}) 🟡` : `1. Site (${drawnSiteNodes.length}) 🟡`}</span>
-                      </button>
-
-                      {/* Step 2: Transition / Detour Layer (Red 🔴) */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveDrawingLayer('transition')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                          activeDrawingLayer === 'transition'
-                            ? 'bg-red-500 text-white shadow-sm ring-2 ring-red-400/50'
-                            : 'text-red-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                        <span>{isAr ? `٢. التحويلة (${drawnTransitionNodes.length}) 🔴` : `2. Detour (${drawnTransitionNodes.length}) 🔴`}</span>
-                      </button>
-
-                      {/* Step 3: Continuous Barrier Wall / NJB / Repeating Sign Range Layer (Cyan 🧱) */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveDrawingLayer('barrier')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                          activeDrawingLayer === 'barrier'
-                            ? 'bg-cyan-500 text-slate-950 shadow-sm ring-2 ring-cyan-400/50'
-                            : 'text-cyan-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-                        <span>{isAr ? `٣. جدار الحواجز (${drawnBarrierNodes.length}) 🧱` : `3. Barrier Wall (${drawnBarrierNodes.length}) 🧱`}</span>
-                      </button>
-
-                      {/* Step 4: Pedestrian Route Layer (Green 🟢 - Optional) */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveDrawingLayer('pedestrian')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                          activeDrawingLayer === 'pedestrian'
-                            ? 'bg-emerald-500 text-slate-950 shadow-sm ring-2 ring-emerald-400/50'
-                            : 'text-emerald-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                        <span>{isAr ? `٤. المشاة (${drawnPedestrianNodes.length}) 🟢` : `4. Ped (${drawnPedestrianNodes.length}) 🟢`}</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsMultiLayerDrawingMode(false)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
-                      title={isAr ? 'إغلاق وضع الرسم' : 'Exit drawing mode'}
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Active Layer Guidance & Sub-Selectors */}
-                  <div className="flex items-center justify-between gap-3 text-xs flex-wrap">
-                    <div className="text-slate-300">
-                      {activeDrawingLayer === 'site' && (
-                        <span>
-                          {isAr
-                            ? `🟡 انقر على الخريطة لتحديد حدود منطقة العمل (تم وضع ${drawnSiteNodes.length} نقاط - يتطلب ٣ على الأقل)`
-                            : `🟡 Click on map to draw Site Boundary polygon (${drawnSiteNodes.length} pts placed)`}
-                        </span>
-                      )}
-                      {activeDrawingLayer === 'transition' && (
-                        <span>
-                          {isAr
-                            ? `🔴 انقر لتحديد مسار وتدرج التحويلة (تم وضع ${drawnTransitionNodes.length} نقاط)`
-                            : `🔴 Click on map to draw Detour Transition line (${drawnTransitionNodes.length} pts placed)`}
-                        </span>
-                      )}
-                      {activeDrawingLayer === 'barrier' && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-cyan-300 font-bold">
-                            {isAr ? '🧱 نوع الجدار / السلسلة المتكررة:' : 'Barrier / Signage Type:'}
-                          </span>
-                          <select
-                            value={selectedBarrierType}
-                            onChange={(e) => setSelectedBarrierType(e.target.value)}
-                            className="bg-slate-900 text-cyan-300 border border-cyan-700/60 rounded px-2 py-0.5 text-xs font-bold focus:outline-none"
-                          >
-                            <option value="concrete_njb">{isAr ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier Wall (2m)'}</option>
-                            <option value="plastic_njb">{isAr ? '🚧 حواجز بلاستيكية مائية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
-                            <option value="cones_series">{isAr ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
-                            <option value="warning_lights_chain">{isAr ? '💡 شريط إضاءة تحذيري متصل' : '💡 Warning Lights Chain'}</option>
-                          </select>
-                          <span className="text-[11px] text-slate-400 font-mono">
-                            {isAr ? `(تم وضع ${drawnBarrierNodes.length} نقاط)` : `(${drawnBarrierNodes.length} pts placed)`}
-                          </span>
-                        </div>
-                      )}
-                      {activeDrawingLayer === 'pedestrian' && (
-                        <span>
-                          {isAr
-                            ? `🟢 انقر لرسم ممر المشاة الآمن (اختياري - ${drawnPedestrianNodes.length} نقاط)`
-                            : `🟢 Click on map to draw Safe Pedestrian Route (${drawnPedestrianNodes.length} pts placed)`}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Node Management Actions (Undo Last Node, Clear Layer) */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleUndoLastPoint}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                        title={isAr ? 'تراجع عن آخر نقطة تم وضعها في الطبقة الحالية' : 'Undo last placed node'}
-                      >
-                        <Undo2 className="w-3 h-3" />
-                        <span>{isAr ? 'تراجع عن نقطة' : 'Undo Point'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleClearActiveLayerPoints}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                        title={isAr ? 'مسح كافة نقاط الطبقة الحالية' : 'Clear active layer points'}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>{isAr ? 'مسح الطبقة' : 'Clear'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Primary Commit & Export Actions Bar */}
-                  <div className="flex items-center justify-between border-t border-slate-800 pt-2 gap-2 flex-wrap">
-                    <div className="text-[11px] text-slate-400">
-                      💡 {isAr ? 'انقر على أي نقطة على الخريطة لحذفها بشكل فردي، أو اسحبها لإعادة ضبط موقعها' : 'Click any node on map to delete individually, or drag to adjust'}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleCommitMultiLayerFeatures}
-                        disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'توليد وحفظ الكاد ⚡' : 'Commit CAD ⚡'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleExportCadDxf}
-                        disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-                        title={isAr ? 'تصدير ملف كاد أوتوكاد متوافق مع كافة الإصدارات' : 'Export certified AutoCAD DXF blueprint'}
-                      >
-                        <DownloadCloud className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'تصدير كاد أوتوكاد 💾' : 'Export CAD 💾'}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Spatial Drag Handle Banner */}
-              {!isLocked && !isMultiLayerDrawingMode && (
+              {!isLocked && !isMultiLayerDrawingMode && hasImportedCad && (
                 <div className="absolute top-3 left-3 z-10 bg-slate-950/85 text-blue-300 px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border border-blue-500/40 shadow-lg flex items-center gap-1.5">
                   <span className="animate-pulse">✥</span>
                   <span>{isAr ? 'اسحب المقبض الأزرق لتحريك المخطط، واسحب أي لوحة لتغيير موقعها' : 'Drag blue handle to align CAD, drag any sign to move'}</span>
                 </div>
               )}
 
-              {/* Saudi MOT Sign & Poster Placement Toolbar Button on Canvas & Expand Keymap Toggle */}
+              {/* Top-Right In-Map Triggers (Keymap, Drawing, MOT Signs) */}
               <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
-                {!showKeymapSidebar && (
-                  <button
-                    type="button"
-                    onClick={() => setShowKeymapSidebar(true)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40 hover:scale-105 active:scale-95"
-                    title={isAr ? 'إظهار لوحة دليل ومفتاح طبقات المخطط' : 'Expand Keymap & Layers Sidebar'}
-                  >
-                    <Layers className="h-3.5 w-3.5 text-brand-gold" />
-                    <span>{isAr ? 'دليل الطبقات 📂' : 'Keymap & Layers 📂'}</span>
-                    <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180 text-amber-400" />
-                  </button>
-                )}
-
                 <button
                   type="button"
                   onClick={() => {
-                    const next = !(isMultiLayerDrawingMode || showControlNodes);
-                    setIsMultiLayerDrawingMode(next);
-                    setShowControlNodes(next);
-                    if (!next) setSelectedEditFeatureIdx(null);
+                    setSidebarTab('keymap');
+                    setShowKeymapSidebar(prev => (showKeymapSidebar && sidebarTab === 'keymap' ? false : true));
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
-                    (isMultiLayerDrawingMode || showControlNodes)
+                    showKeymapSidebar && sidebarTab === 'keymap'
                       ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
                       : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'
                   }`}
-                  title={isAr ? 'إظهار/إخفاء لوحة وأدوات الرسم الهندسي المتعدد' : 'Toggle Multi-Layer CAD Drawing Menu'}
+                  title={isAr ? 'إظهار لوحة دليل ومفتاح طبقات المخطط' : 'Keymap & CAD Layers'}
                 >
-                  <PenTool className="h-3.5 w-3.5 text-brand-gold" />
-                  <span>{isAr ? 'لوحة الرسم الهندسي ✏️' : 'CAD Drawing Menu ✏️'}</span>
+                  <Layers className="h-3.5 w-3.5 text-brand-gold" />
+                  <span>{isAr ? 'دليل الطبقات 📂' : 'Keymap & Layers 📂'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setShowPalette(!showPalette)}
+                  onClick={() => {
+                    setSidebarTab('drawing');
+                    setIsMultiLayerDrawingMode(true);
+                    setShowKeymapSidebar(prev => (showKeymapSidebar && sidebarTab === 'drawing' ? false : true));
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
-                    showPalette
+                    showKeymapSidebar && sidebarTab === 'drawing'
                       ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
                       : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'
                   }`}
+                  title={isAr ? 'أدوات الرسم الهندسي المتعدد وتحديد النطاق' : 'CAD Drawing Tools'}
+                >
+                  <PenTool className="h-3.5 w-3.5 text-brand-gold" />
+                  <span>{isAr ? 'أدوات الرسم ✏️' : 'CAD Drawing ✏️'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarTab('signs');
+                    setShowKeymapSidebar(prev => (showKeymapSidebar && sidebarTab === 'signs' ? false : true));
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
+                    showKeymapSidebar && sidebarTab === 'signs'
+                      ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
+                      : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'
+                  }`}
+                  title={isAr ? 'دليل الشواخص واللوحات السعودية المعتمدة' : 'Saudi MOT Signs Palette'}
                 >
                   <GripVertical className="h-3.5 w-3.5 text-brand-gold" />
-                  <span>{isAr ? 'دليل الشواخص واللوحات السعودية (MOT)' : 'Saudi MOT Signs Palette'}</span>
+                  <span>{isAr ? 'الشواخص المرورية (MOT) 🛑' : 'MOT Signs (MOT) 🛑'}</span>
                 </button>
               </div>
 
@@ -3249,7 +3169,7 @@ const DwgMapOverlay = ({
                     <button
                       type="button"
                       onClick={() => setSelectedElementId(null)}
-                      className="text-slate-400 hover:text-white"
+                      className="text-slate-400 hover:text-white cursor-pointer"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -3260,7 +3180,7 @@ const DwgMapOverlay = ({
                       onClick={() => {
                         setPlacedElements(prev => prev.map(e => e.id === selectedElement.id ? { ...e, rotation: ((e.rotation || 0) + 45) % 360 } : e));
                       }}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-slate-700"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-slate-700 cursor-pointer"
                     >
                       <RotateCw className="h-3 w-3 text-brand-gold" />
                       <span>{isAr ? `تدوير (${selectedElement.rotation || 0}°)` : `Rotate (${selectedElement.rotation || 0}°)`}</span>
@@ -3272,7 +3192,7 @@ const DwgMapOverlay = ({
                         const newLng = selectedElement.lng + 0.0001;
                         setPlacedElements(prev => [...prev, { ...selectedElement, id: `elem_${Date.now()}`, lat: newLat, lng: newLng }]);
                       }}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-slate-700"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-slate-700 cursor-pointer"
                     >
                       <Copy className="h-3 w-3 text-cyan-400" />
                       <span>{isAr ? 'تكرار' : 'Duplicate'}</span>
@@ -3283,74 +3203,12 @@ const DwgMapOverlay = ({
                         setPlacedElements(prev => prev.filter(e => e.id !== selectedElement.id));
                         setSelectedElementId(null);
                       }}
-                      className="bg-red-950/80 hover:bg-red-900 text-red-300 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-red-800/60"
+                      className="bg-red-950/80 hover:bg-red-900 text-red-300 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 border border-red-800/60 cursor-pointer"
                     >
                       <Trash2 className="h-3 w-3 text-red-400" />
                       <span>{isAr ? 'حذف' : 'Delete'}</span>
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* Floating MOT Traffic Signs & Barrier Posters Palette on Map */}
-              {showPalette && (
-                <div className="absolute top-12 right-3 z-20 bg-slate-950/95 backdrop-blur-md text-white border border-slate-700 rounded-2xl p-3 max-w-sm w-92 shadow-2xl space-y-2.5 animate-in fade-in zoom-in duration-150">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
-                    <span className="font-bold text-xs text-brand-gold flex items-center gap-1.5">
-                      <span>🇸🇦</span>
-                      <span>{isAr ? 'مكتبة الشواخص واللوحات السعودية المعتمدة' : 'Saudi MOT Signs & Safety Library'}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowPalette(false)}
-                      className="text-slate-400 hover:text-white"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  {/* Categories */}
-                  <div className="flex border-b border-slate-800 bg-slate-900 rounded-lg p-1">
-                    {Object.entries(SAUDI_MOT_ELEMENTS).map(([key, cat]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setActivePaletteCategory(key)}
-                        className={`flex-1 py-1 text-[11px] font-bold rounded-md transition ${
-                          activePaletteCategory === key
-                            ? 'bg-slate-800 text-white shadow-xs'
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                        style={activePaletteCategory === key ? { color: cat.color } : {}}
-                      >
-                        {cat.titleAr.split(' ')[0]}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Items Grid */}
-                  <div className="grid grid-cols-1 gap-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-                    {SAUDI_MOT_ELEMENTS[activePaletteCategory]?.items.map(item => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleAddElement(item.id)}
-                        className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-brand-gold hover:bg-slate-850 transition text-right group"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl group-hover:scale-115 transition-transform">{item.icon}</span>
-                          <span className="text-xs font-semibold text-slate-200">{isAr ? item.labelAr : item.labelEn}</span>
-                        </div>
-                        <span className="text-[10px] bg-blue-900/60 text-blue-300 border border-blue-800/40 px-2 py-0.5 rounded font-mono font-bold">
-                          + {isAr ? 'إضافة' : 'Add'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <p className="text-[9.5px] text-slate-400 border-t border-slate-800 pt-1.5">
-                    {isAr ? '🖱️ انقر لإضافة اللوحة، واسحبها على الخريطة لتحديد مكانها بدقة (انقر للتدوير 45°)' : 'Click to place sign, then drag freely on map (click sign to rotate)'}
-                  </p>
                 </div>
               )}
 
@@ -3367,7 +3225,7 @@ const DwgMapOverlay = ({
                     <button
                       type="button"
                       onClick={() => setSelectedFeatureInfo(null)}
-                      className="text-slate-400 hover:text-white"
+                      className="text-slate-400 hover:text-white cursor-pointer"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -3398,131 +3256,458 @@ const DwgMapOverlay = ({
               )}
             </div>
 
-            {/* ── DOCKED KEYMAP & LAYERS PANEL (4 of 12 cols on desktop) ── */}
+            {/* ── UNIFIED RIGHT SIDEBAR (KEYMAP / DRAWING / MOT SIGNS) ── */}
             {showKeymapSidebar && (
-              <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4 animate-fade-in">
+              <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4 animate-fade-in min-h-[640px]">
                 <div className="space-y-3.5">
-                  {/* Header & Collapse Button */}
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div>
-                      <h3 className="font-bold text-sm text-brand-gold flex items-center gap-1.5">
-                        <Layers className="h-4 w-4" />
-                        <span>{isAr ? 'دليل ومفتاح طبقات المخطط' : 'Keymap & CAD Layers'}</span>
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {isAr ? 'معايير أمانة المدينة المنورة وكود الطرق ٣٠٥' : 'MOT & Saudi Road Code 305 Standards'}
-                      </p>
+                  {/* Top Header: Tab Switchers & Collapse Button */}
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800 gap-2">
+                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => setSidebarTab('keymap')}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                          sidebarTab === 'keymap'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        <span>{isAr ? 'الطبقات' : 'Layers'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSidebarTab('drawing');
+                          setIsMultiLayerDrawingMode(true);
+                        }}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                          sidebarTab === 'drawing'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <PenTool className="h-3.5 w-3.5" />
+                        <span>{isAr ? 'الرسم' : 'Drawing'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSidebarTab('signs')}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                          sidebarTab === 'signs'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <GripVertical className="h-3.5 w-3.5" />
+                        <span>{isAr ? 'الشواخص' : 'Signs'}</span>
+                      </button>
                     </div>
+
                     <button
                       type="button"
                       onClick={() => setShowKeymapSidebar(false)}
                       className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition cursor-pointer"
-                      title={isAr ? 'إخفاء لوحة الطبقات لتوسيع الخريطة' : 'Collapse Sidebar for Full Map'}
+                      title={isAr ? 'إخفاء اللوحة الجانبية' : 'Collapse Sidebar'}
                     >
                       <ChevronRight className="h-4 w-4 rtl:rotate-180 text-slate-300" />
                     </button>
                   </div>
 
-                  {/* 6 MOT Functional Color Groups */}
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-                    {Object.values(MOT_KEYMAP_GROUPS).map((group) => {
-                      const isVisible = keymapVisibility[group.id] !== false;
-                      const count = featureCounts[group.id] || 0;
+                  {/* ── TAB 1: KEYMAP & CAD LAYERS ── */}
+                  {sidebarTab === 'keymap' && (
+                    <div className="space-y-3 animate-in fade-in duration-150">
+                      <div>
+                        <h4 className="font-bold text-xs text-brand-gold flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5" />
+                          <span>{isAr ? 'دليل ومفتاح طبقات المخطط (MOT 305)' : 'Keymap & CAD Layer Specifications'}</span>
+                        </h4>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5">
+                          {isAr ? 'انقر على أي طبقة لإظهارها أو إخفائها' : 'Click any layer to toggle visibility'}
+                        </p>
+                      </div>
 
-                      return (
-                        <div
-                          key={group.id}
-                          onClick={() => toggleGroupVisibility(group.id)}
-                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all select-none ${
-                            isVisible
-                              ? `${group.bgClass} ${group.borderClass} shadow-xs`
-                              : 'bg-slate-900/40 border-slate-800/40 opacity-40 hover:opacity-60'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {/* Color Swatch */}
-                              <span
-                                className="w-4 h-4 rounded-full shrink-0 shadow-xs border border-white/30"
-                                style={{ backgroundColor: group.color }}
-                              />
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-bold text-slate-100 text-xs truncate">
-                                    {isAr ? group.titleAr : group.titleEn}
-                                  </span>
-                                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md bg-slate-900 text-slate-300 border border-slate-700">
-                                    {count}
-                                  </span>
+                      <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1 custom-scrollbar">
+                        {Object.values(MOT_KEYMAP_GROUPS).map((group) => {
+                          const isVisible = keymapVisibility[group.id] !== false;
+                          const count = featureCounts[group.id] || 0;
+
+                          return (
+                            <div
+                              key={group.id}
+                              onClick={() => toggleGroupVisibility(group.id)}
+                              className={`p-3 rounded-xl border text-xs cursor-pointer transition-all select-none ${
+                                isVisible
+                                  ? `${group.bgClass} ${group.borderClass} shadow-xs`
+                                  : 'bg-slate-900/40 border-slate-800/40 opacity-40 hover:opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span
+                                    className="w-4 h-4 rounded-full shrink-0 shadow-xs border border-white/30"
+                                    style={{ backgroundColor: group.color }}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-slate-100 text-xs truncate">
+                                        {isAr ? group.titleAr : group.titleEn}
+                                      </span>
+                                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md bg-slate-900 text-slate-300 border border-slate-700">
+                                        {count}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10.5px] text-slate-400 mt-1 line-clamp-2">
+                                      {isAr ? group.descAr : group.descEn}
+                                    </p>
+                                  </div>
                                 </div>
-                                <p className="text-[10.5px] text-slate-400 mt-1 line-clamp-2">
-                                  {isAr ? group.descAr : group.descEn}
-                                </p>
+
+                                <div className="shrink-0 ml-2">
+                                  {isVisible ? (
+                                    <Eye className="h-4 w-4 text-emerald-400" />
+                                  ) : (
+                                    <EyeOff className="h-4 w-4 text-slate-500" />
+                                  )}
+                                </div>
                               </div>
                             </div>
-
-                            {/* Eye Switch */}
-                            <div className="shrink-0 ml-2">
-                              {isVisible ? (
-                                <Eye className="h-4 w-4 text-emerald-400" />
-                              ) : (
-                                <EyeOff className="h-4 w-4 text-slate-500" />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Placed Elements Summary in Side Panel */}
-                {placedElements.length > 0 && (
-                  <div className="pt-3 border-t border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-300 flex items-center gap-1">
-                        <span>🛑</span>
-                        <span>{isAr ? `اللوحات والشواخص الموضوعة (${placedElements.length})` : `Placed Elements (${placedElements.length})`}</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPlacedElements([]);
-                          setSelectedElementId(null);
-                        }}
-                        className="text-[10px] text-red-400 hover:text-red-300 font-bold cursor-pointer"
-                      >
-                        {isAr ? 'مسح الكل' : 'Clear'}
-                      </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto custom-scrollbar">
-                      {placedElements.map((el, idx) => (
-                        <span
-                          key={el.id}
-                          onClick={() => setSelectedElementId(el.id)}
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition border ${
-                            selectedElementId === el.id
-                              ? 'bg-blue-900/80 border-blue-500 text-blue-200 shadow-sm'
-                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                  )}
+
+                  {/* ── TAB 2: CAD DRAWING TOOLS & CONTROL NODES ── */}
+                  {sidebarTab === 'drawing' && (
+                    <div className="space-y-3.5 animate-in fade-in duration-150 text-xs">
+                      <div>
+                        <h4 className="font-bold text-xs text-brand-gold flex items-center gap-1.5">
+                          <PenTool className="h-3.5 w-3.5" />
+                          <span>{isAr ? 'أدوات الرسم والتخطيط المتعدد' : 'Multi-Layer CAD Drawing Mode'}</span>
+                        </h4>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5">
+                          {isAr ? 'اختر الطبقة وانقر على الخريطة لتحديد النقاط' : 'Select layer and click map to place nodes'}
+                        </p>
+                      </div>
+
+                      {/* 5 Drawing Layer Sub-Tabs */}
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+                        {/* 1. Site */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('site')}
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'site'
+                              ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400/50'
+                              : 'text-amber-400 hover:bg-slate-800'
                           }`}
                         >
-                          <span>{el.type}</span>
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+                          <span className="truncate">{isAr ? `١. الموقع (${drawnSiteNodes.length}) 🟡` : `1. Site (${drawnSiteNodes.length}) 🟡`}</span>
+                        </button>
+
+                        {/* 2. Transition */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('transition')}
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'transition'
+                              ? 'bg-red-500 text-white shadow-sm ring-2 ring-red-400/50'
+                              : 'text-red-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0"></span>
+                          <span className="truncate">{isAr ? `٢. التحويلة (${drawnTransitionNodes.length}) 🔴` : `2. Detour (${drawnTransitionNodes.length}) 🔴`}</span>
+                        </button>
+
+                        {/* 3. Barrier */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('barrier')}
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'barrier'
+                              ? 'bg-cyan-500 text-slate-950 shadow-sm ring-2 ring-cyan-400/50'
+                              : 'text-cyan-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0"></span>
+                          <span className="truncate">{isAr ? `٣. الحواجز (${drawnBarrierNodes.length}) 🧱` : `3. Barrier (${drawnBarrierNodes.length}) 🧱`}</span>
+                        </button>
+
+                        {/* 4. Pedestrian */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('pedestrian')}
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'pedestrian'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm ring-2 ring-emerald-400/50'
+                              : 'text-emerald-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+                          <span className="truncate">{isAr ? `٤. المشاة (${drawnPedestrianNodes.length}) 🟢` : `4. Ped (${drawnPedestrianNodes.length}) 🟢`}</span>
+                        </button>
+
+                        {/* 5. Custom Text Labels */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('labels')}
+                          className={`col-span-2 p-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'labels'
+                              ? 'bg-sky-500 text-slate-950 shadow-sm ring-2 ring-sky-400/50'
+                              : 'text-sky-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          <Tag className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isAr ? `٥. التسميات والنصوص التوضيحية (${customTextLabels.length}) 🏷️` : `5. Custom Text Labels (${customTextLabels.length}) 🏷️`}</span>
+                        </button>
+                      </div>
+
+                      {/* Active Layer Guidance & Context Controls */}
+                      <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-2">
+                        {activeDrawingLayer === 'site' && (
+                          <p className="text-amber-300 text-[11px] leading-relaxed">
+                            {isAr
+                              ? `🟡 انقر على الخريطة لتحديد أركان منطقة العمل (تم وضع ${drawnSiteNodes.length} نقاط - يتطلب ٣ على الأقل).`
+                              : `🟡 Click on map to place work zone boundary polygon (${drawnSiteNodes.length} pts placed, min 3 required).`}
+                          </p>
+                        )}
+
+                        {activeDrawingLayer === 'transition' && (
+                          <p className="text-red-300 text-[11px] leading-relaxed">
+                            {isAr
+                              ? `🔴 انقر على الخريطة لرسم خط مسار التحويلة والتدرج (${drawnTransitionNodes.length} نقاط).`
+                              : `🔴 Click on map to trace transition taper line (${drawnTransitionNodes.length} pts placed).`}
+                          </p>
+                        )}
+
+                        {activeDrawingLayer === 'barrier' && (
+                          <div className="space-y-1.5">
+                            <span className="text-cyan-300 font-bold text-[11px] block">
+                              {isAr ? '🧱 نوع الجدار / السلسلة المتكررة:' : 'Barrier Wall / Signage Series Type:'}
+                            </span>
+                            <select
+                              value={selectedBarrierType}
+                              onChange={(e) => setSelectedBarrierType(e.target.value)}
+                              className="w-full bg-slate-950 text-cyan-300 border border-cyan-700/60 rounded-lg p-1.5 text-xs font-bold focus:outline-none"
+                            >
+                              <option value="concrete_njb">{isAr ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier Wall (2m)'}</option>
+                              <option value="plastic_njb">{isAr ? '🚧 حواجز بلاستيكية مائية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
+                              <option value="cones_series">{isAr ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
+                              <option value="warning_lights_chain">{isAr ? '💡 شريط إضاءة تحذيري متصل' : '💡 Warning Lights Chain'}</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {activeDrawingLayer === 'pedestrian' && (
+                          <p className="text-emerald-300 text-[11px] leading-relaxed">
+                            {isAr
+                              ? `🟢 انقر على الخريطة لتحديد مسار ممر المشاة الآمن (اختياري - ${drawnPedestrianNodes.length} نقاط).`
+                              : `🟢 Click on map to draw safe pedestrian corridor (${drawnPedestrianNodes.length} pts placed).`}
+                          </p>
+                        )}
+
+                        {activeDrawingLayer === 'labels' && (
+                          <div className="space-y-2">
+                            <span className="text-sky-300 font-bold text-[11px] block">
+                              {isAr ? '🏷️ أدخل نص التسمية ثم انقر على الخريطة لوضعها:' : '🏷️ Enter label text and click map to place:'}
+                            </span>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                value={newLabelText}
+                                onChange={(e) => setNewLabelText(e.target.value)}
+                                placeholder={isAr ? 'مثال: محطة STA 0+100 أو مسار طوارئ' : 'e.g. STA 0+100 or Emergency Route'}
+                                className="flex-1 bg-slate-950 text-sky-200 border border-sky-600/50 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400"
+                              />
+                            </div>
+
+                            {customTextLabels.length > 0 && (
+                              <div className="pt-2 border-t border-slate-800 space-y-1">
+                                <div className="flex items-center justify-between text-[10.5px]">
+                                  <span className="font-bold text-slate-300">{isAr ? 'التسميات الموضوعة:' : 'Placed Labels:'}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCustomTextLabels([])}
+                                    className="text-red-400 hover:text-red-300 font-bold cursor-pointer"
+                                  >
+                                    {isAr ? 'مسح الكل' : 'Clear All'}
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+                                  {customTextLabels.map((lbl) => (
+                                    <span
+                                      key={lbl.id}
+                                      className="inline-flex items-center gap-1 bg-sky-950 border border-sky-700/60 text-sky-300 px-2 py-0.5 rounded text-[10px]"
+                                    >
+                                      <span>{lbl.text}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setCustomTextLabels(prev => prev.filter(item => item.id !== lbl.id))}
+                                        className="text-slate-400 hover:text-red-400 ml-1 font-bold cursor-pointer"
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Node Actions (Undo, Clear Layer) */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPlacedElements(prev => prev.filter((_, i) => i !== idx));
-                              if (selectedElementId === el.id) setSelectedElementId(null);
-                            }}
-                            className="text-slate-500 hover:text-red-400 ml-1 font-bold"
+                            onClick={handleUndoLastPoint}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                           >
-                            ×
+                            <Undo2 className="w-3 h-3" />
+                            <span>{isAr ? 'تراجع عن نقطة' : 'Undo Point'}</span>
                           </button>
-                        </span>
-                      ))}
+
+                          <button
+                            type="button"
+                            onClick={handleClearActiveLayerPoints}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>{isAr ? 'مسح الطبقة' : 'Clear Layer'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Commit & Export Actions */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <button
+                          type="button"
+                          onClick={handleCommitMultiLayerFeatures}
+                          disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
+                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'توليد وحفظ الكاد ⚡' : 'Commit CAD ⚡'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleExportCadDxf}
+                          disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
+                          className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                        >
+                          <DownloadCloud className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'تصدير كاد أوتوكاد DXF 💾' : 'Export CAD DXF 💾'}</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+
+                  {/* ── TAB 3: SAUDI MOT SIGNS PALETTE ── */}
+                  {sidebarTab === 'signs' && (
+                    <div className="space-y-3 animate-in fade-in duration-150 text-xs">
+                      <div>
+                        <h4 className="font-bold text-xs text-brand-gold flex items-center gap-1.5">
+                          <GripVertical className="h-3.5 w-3.5" />
+                          <span>{isAr ? 'مكتبة الشواخص واللوحات السعودية (MOT)' : 'Saudi MOT Signs & Safety Library'}</span>
+                        </h4>
+                        <p className="text-[10.5px] text-slate-400 mt-0.5">
+                          {isAr ? 'انقر على اللوحة لإضافتها للخريطة واسحبها لتحديد مكانها' : 'Click to place sign, then drag freely on map'}
+                        </p>
+                      </div>
+
+                      {/* Categories */}
+                      <div className="flex border-b border-slate-800 bg-slate-900 rounded-lg p-1">
+                        {Object.entries(SAUDI_MOT_ELEMENTS).map(([key, cat]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setActivePaletteCategory(key)}
+                            className={`flex-1 py-1 text-[11px] font-bold rounded-md transition cursor-pointer ${
+                              activePaletteCategory === key
+                                ? 'bg-slate-800 text-white shadow-xs'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                            style={activePaletteCategory === key ? { color: cat.color } : {}}
+                          >
+                            {cat.titleAr.split(' ')[0]}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Items Grid */}
+                      <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                        {SAUDI_MOT_ELEMENTS[activePaletteCategory]?.items.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => handleAddElement(item.id)}
+                            className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-brand-gold hover:bg-slate-850 transition text-right group cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl group-hover:scale-115 transition-transform">{item.icon}</span>
+                              <span className="text-xs font-semibold text-slate-200">{isAr ? item.labelAr : item.labelEn}</span>
+                            </div>
+                            <span className="text-[10px] bg-blue-900/60 text-blue-300 border border-blue-800/40 px-2 py-0.5 rounded font-mono font-bold">
+                              + {isAr ? 'إضافة' : 'Add'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Placed Elements Summary */}
+                      {placedElements.length > 0 && (
+                        <div className="pt-3 border-t border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-slate-300 flex items-center gap-1">
+                              <span>🛑</span>
+                              <span>{isAr ? `اللوحات الموضوعة (${placedElements.length})` : `Placed Elements (${placedElements.length})`}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlacedElements([]);
+                                setSelectedElementId(null);
+                              }}
+                              className="text-[10px] text-red-400 hover:text-red-300 font-bold cursor-pointer"
+                            >
+                              {isAr ? 'مسح الكل' : 'Clear'}
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar">
+                            {placedElements.map((el, idx) => (
+                              <span
+                                key={el.id}
+                                onClick={() => setSelectedElementId(el.id)}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition border ${
+                                  selectedElementId === el.id
+                                    ? 'bg-blue-900/80 border-blue-500 text-blue-200 shadow-sm'
+                                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                                }`}
+                              >
+                                <span>{el.type}</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPlacedElements(prev => prev.filter((_, i) => i !== idx));
+                                    if (selectedElementId === el.id) setSelectedElementId(null);
+                                  }}
+                                  className="text-slate-500 hover:text-red-400 ml-1 font-bold cursor-pointer"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
