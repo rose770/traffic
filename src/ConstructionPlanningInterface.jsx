@@ -4327,96 +4327,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             {currentPhase === 1 && (
               <div className="space-y-6 animate-fade-in">
                 
-                {/* 1.4 CAD Blueprint Preparation Choice (Direct Drawing vs Smart Upload Dropzone) */}
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                  <div className="p-5 bg-gradient-to-r from-slate-50 to-amber-50/40 border-b border-slate-200 font-bold text-brand-dark text-sm flex items-center justify-between flex-wrap gap-2">
-                    <span className="flex items-center gap-2">
-                      <Compass className="h-5 w-5 text-brand-primary" />
-                      {language === 'ar' ? '١.٤ طريقة إعداد المخطط الهندسي وعناصر الموقع' : '1.4 Blueprint Preparation & Site Drawing Method'}
-                    </span>
-                    <span className="text-[11px] font-bold text-amber-800 bg-amber-100/80 px-3 py-1 rounded-full border border-amber-300">
-                      {language === 'ar' ? '⚡ اختر الطريقة المناسبة: رسم مباشر أو رفع مخطط' : '⚡ Choose: Direct Drawing or Blueprint Upload'}
-                    </span>
-                  </div>
-
-                  <div className="p-6 space-y-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                      
-                      {/* Option A: Direct Interactive GIS Drawing */}
-                      <div
-                        onClick={() => {
-                          setDirectDrawingTrigger(true);
-                          setCurrentPhase(2);
-                          setExpandedPanels(prev => ({ ...prev, p2_blueprint: true }));
-                        }}
-                        className="border-2 border-amber-500/60 hover:border-amber-500 bg-gradient-to-br from-amber-50/70 to-orange-50/40 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg flex flex-col justify-between group relative overflow-hidden"
-                      >
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
-                              <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-700 group-hover:scale-110 transition-transform">
-                                <PenTool className="w-5 h-5" />
-                              </div>
-                              <span>{language === 'ar' ? '✏️ التخطيط والرسم المباشر على الخريطة' : '✏️ Direct Map Drawing (No File Needed)'}</span>
-                            </div>
-                            <span className="text-[10px] font-bold bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded-full shadow-xs">
-                              {language === 'ar' ? 'بدون ملف كاد' : 'Zero Upload'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                            {language === 'ar'
-                              ? 'افتح الخريطة التفاعلية فوراً وحدد حدود الموقع (أصفر 🟡)، مسار التحويلة (أحمر 🔴)، جدار الحواجز (🧱)، وممر المشاة (أخضر 🟢)، مع إمكانية التراجع والتعديل وتصدير ملف AutoCAD DXF معتمد تلقائياً.'
-                              : 'Open the interactive map immediately to place Site Boundary (Yellow 🟡), Detour Transition (Red 🔴), Barrier Wall (🧱), and Pedestrian Route (Green 🟢) with undo/redo and certified DXF export.'}
-                          </p>
-                        </div>
-                        <div className="mt-5 pt-3 border-t border-amber-200/80 flex items-center justify-between text-xs font-black text-amber-900">
-                          <span>{language === 'ar' ? 'بدء الرسم المباشر على الخريطة ⚡' : 'Launch Direct Interactive Drawing ⚡'}</span>
-                          <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
-                        </div>
-                      </div>
-
-                      {/* Option B: Smart CAD Ingestion & Auto-Fill */}
-                      <div className="border-2 border-blue-500/40 hover:border-blue-500 bg-gradient-to-br from-blue-50/50 to-slate-50/80 rounded-2xl p-5 transition-all hover:shadow-lg flex flex-col justify-between">
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-slate-900 font-extrabold text-sm">
-                              <div className="w-9 h-9 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-600">
-                                <Upload className="w-5 h-5" />
-                              </div>
-                              <span>{language === 'ar' ? '📁 استيراد وتحليل مخطط أوتوكاد جاهز' : '📁 Smart AutoCAD Ingestion (DWG/DXF)'}</span>
-                            </div>
-                            <span className="text-[10px] font-bold bg-blue-600 text-white px-2.5 py-0.5 rounded-full shadow-xs">
-                              {language === 'ar' ? 'تعبئة تلقائية' : 'Auto-Fill'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                            {language === 'ar'
-                              ? 'اسحب وأفلت مخطط الأوتوكاد (DWG أو DXF) لاستخراج اسم الشارع، أطوال التحويلة، أبعاد الحفر، واللوحات المرورية ومطابقتها مكانياً بنظام UTM 37N.'
-                              : 'Drag & drop consultant AutoCAD blueprint to automatically extract road names, excavation bounds, detour lengths, and MOT signage with georeferencing.'}
-                          </p>
-                        </div>
-
-                        {/* Direct Dropzone Widget embedded inside Option B */}
-                        <div className="mt-4">
-                          <CadSmartImportDropzone
-                            language={language}
-                            onCadParsed={handleCadAutoExtract}
-                            onCadReset={handleCadReset}
-                            onFieldFocus={handleFieldFocus}
-                            currentFormData={formData}
-                            isParsed={!!sharedDwgData}
-                            parsedData={sharedDwgData}
-                            fileName={sharedDwgFileName}
-                          />
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                </div>
-
                 {/* 1. General Project Details Panel */}
-
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -4584,9 +4495,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                                 </span>
                               </div>
                               <ul className="list-disc list-inside text-[11px] text-amber-800 space-y-0.5 font-sans pl-6">
-                                <li>{language === 'ar' ? 'إلزامية استخدام الحواجز الخرسانية المسلحة (Concrete Barriers) للسلامة وتمنع الحواجز البلاستيكية.' : 'Concrete Safety Barriers mandated. Water-filled plastic barriers and cones prohibited.'}</li>
-                                <li>{language === 'ar' ? 'إلزامية معدات السلامة الليلية ومستشعرات الإضاءة ذكية مع إشارات وامضة.' : '150 Lux lighting towers & solar LED warning beacons required.'}</li>
-                                <li>{language === 'ar' ? 'إلزامية دورة الاعتماد وتوقيعات أطراف التحويلة الـ ٥ قبل البدء.' : '5-Party official stakeholder approval workflow & e-signatures enforced.'}</li>
                               </ul>
                             </div>
                           );
@@ -4613,7 +4521,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-                {/* 1.5 Work Description, Road Classification & Traffic Data (PDF-required, previously missing) */}
+                {/* 1.2 Work Description, Road Classification & Traffic Data */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -4732,53 +4640,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           </div>
                         );
                       })()}
-
-                      <div>
-                        {renderFieldHeader(language === 'ar' ? 'طول التحويلة الكلي (شريط القياس)' : 'Total Diversion Length (Tape Measure)', 'diversionLengthM', true)}
-                        <input type="number" min="0" name="diversionLengthM" value={formData.diversionLengthM} onChange={handleInputChange} className={getFieldInputClass('diversionLengthM', true)} />
-                      </div>
-                      <div className="flex items-end">
-                        {isPedestrianPathMandatory(formData.diversionLengthM, formData.roadClassification) && (
-                          <label className="flex items-center gap-2 cursor-pointer bg-amber-50 border border-amber-200 rounded-lg p-2.5 w-full">
-                            <input
-                              type="checkbox"
-                              checked={!!formData.pedestrianPathProvided}
-                              onChange={(e) => setFormData(prev => ({ ...prev, pedestrianPathProvided: e.target.checked }))}
-                              className="w-4 h-4 text-brand-primary border-slate-300 rounded focus:ring-brand-primary"
-                            />
-                            <span className="text-[11px] font-bold text-amber-800">
-                              {language === 'ar'
-                                ? `مطلوب: توفير ممر مشاة ≥ ${PEDESTRIAN_MIN_PATH_WIDTH_M}م (طول التحويلة > 400م)`
-                                : `Required: pedestrian path ≥ ${PEDESTRIAN_MIN_PATH_WIDTH_M}m (diversion length > 400m)`}
-                            </span>
-                          </label>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'خطة الإضاءة' : 'Lighting Plan'}
-                        </label>
-                        <textarea
-                          rows="2"
-                          name={language === 'ar' ? 'lightingPlanAr' : 'lightingPlanEn'}
-                          value={language === 'ar' ? formData.lightingPlanAr : formData.lightingPlanEn}
-                          onChange={handleInputChange}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-brand-text-gray uppercase">
-                          {language === 'ar' ? 'خطة التعامل مع الشوارع الجانبية والمعابر' : 'Side Streets & Crossings Plan'}
-                        </label>
-                        <textarea
-                          rows="2"
-                          name={language === 'ar' ? 'sideStreetsPlanAr' : 'sideStreetsPlanEn'}
-                          value={language === 'ar' ? formData.sideStreetsPlanAr : formData.sideStreetsPlanEn}
-                          onChange={handleInputChange}
-                          className="mt-2 block w-full rounded-lg bg-white border border-slate-300 focus:border-brand-primary text-brand-text-dark p-2.5 text-xs transition"
-                        />
-                      </div>
 
                       {/* Long-duration presentation reminders (road marking repaint / site fencing) */}
                       {needsRoadMarkingRepaint(formData.workStartDate) && (
@@ -5397,6 +5258,40 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </div>
                       </div>
 
+                      {/* Total Diversion Length (Tape Measure) - Synced from CAD / Manually Editable */}
+                      <div className="bg-gradient-to-r from-amber-50/90 to-orange-50/50 border border-amber-300 rounded-xl p-4 space-y-2 shadow-xs">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <label className="block text-xs font-bold text-amber-950 uppercase flex items-center gap-1.5">
+                            <span>📏</span>
+                            <span>{language === 'ar' ? 'إجمالي طول التحويلة المرورية (شريط القياس)' : 'TOTAL DIVERSION LENGTH (TAPE MEASURE)'}</span>
+                          </label>
+                          <span className="text-[10.5px] font-bold bg-amber-200/90 text-amber-950 px-2.5 py-0.5 rounded-full border border-amber-300 font-mono">
+                            {language === 'ar' ? 'مستخرج من الكاد وقابل للتعديل اليدوي ⚡' : 'CAD Extracted & Manually Editable ⚡'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                          <div className="sm:col-span-2">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              name="diversionLengthM"
+                              value={formData.diversionLengthM || ''}
+                              onChange={handleInputChange}
+                              placeholder={language === 'ar' ? 'أدخل إجمالي طول التحويلة بالمتر...' : 'Enter total diversion length in meters...'}
+                              className="w-full bg-white border border-amber-300 rounded-lg p-2.5 text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+                          <div className="text-[11px] text-amber-900 font-medium">
+                            {formData.diversionLengthM ? (
+                              <span>{language === 'ar' ? `الطول المعتمد: ${formData.diversionLengthM} متر` : `Approved Length: ${formData.diversionLengthM} m`}</span>
+                            ) : (
+                              <span className="text-slate-500">{language === 'ar' ? 'سيتم حسابه تلقائياً من المخطط أو إدخاله يدوياً' : 'Auto-computed from CAD or entered manually'}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="bg-slate-950 rounded-2xl overflow-hidden shadow-xl border border-slate-800 p-3 sm:p-5">
                         <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800 text-xs flex-wrap gap-2">
                           <div className="flex items-center gap-2 text-white font-bold">
@@ -5615,6 +5510,36 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           <option value="anti_skid">{language === 'ar' ? 'ألواح مانعة للانزلاق (للمشاة)' : 'Anti-Skid Trench Covers'}</option>
                           <option value="pedestrian">{language === 'ar' ? 'جسور مشاة حديدية مع درابزين حماية' : 'Pedestrian Iron Bridges with Handrails'}</option>
                         </select>
+                      </div>
+
+                      {/* Lighting Plan & Side Streets / Crossings Plan */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase">
+                            {language === 'ar' ? 'خطة الإضاءة (LIGHTING PLAN)' : 'LIGHTING PLAN'}
+                          </label>
+                          <textarea
+                            rows="2"
+                            name={language === 'ar' ? 'lightingPlanAr' : 'lightingPlanEn'}
+                            value={language === 'ar' ? formData.lightingPlanAr : formData.lightingPlanEn}
+                            onChange={handleInputChange}
+                            placeholder={language === 'ar' ? 'أدخل تفاصيل خطة الإضاءة والتحذير الليلي...' : 'Enter lighting and night safety plan...'}
+                            className="w-full mt-2 border border-slate-300 rounded-lg p-2.5 text-xs bg-white focus:ring-brand-primary text-brand-text-dark"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase">
+                            {language === 'ar' ? 'خطة التعامل مع الشوارع الجانبية والمعابر (SIDE STREETS & CROSSINGS PLAN)' : 'SIDE STREETS & CROSSINGS PLAN'}
+                          </label>
+                          <textarea
+                            rows="2"
+                            name={language === 'ar' ? 'sideStreetsPlanAr' : 'sideStreetsPlanEn'}
+                            value={language === 'ar' ? formData.sideStreetsPlanAr : formData.sideStreetsPlanEn}
+                            onChange={handleInputChange}
+                            placeholder={language === 'ar' ? 'أدخل خطة التعامل مع الشوارع الفرعية والتقاطعات...' : 'Enter side streets & crossings management plan...'}
+                            className="w-full mt-2 border border-slate-300 rounded-lg p-2.5 text-xs bg-white focus:ring-brand-primary text-brand-text-dark"
+                          />
+                        </div>
                       </div>
 
 
