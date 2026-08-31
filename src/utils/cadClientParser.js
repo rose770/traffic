@@ -22,26 +22,25 @@ const aciToHex = (colorIndex) => {
 const cleanDxfText = (txt = '') => {
   if (!txt) return '';
   return txt
-    .replace(/\\A[0-9];/g, '')
-    .replace(/\\H[0-9.]+x;/g, '')
-    .replace(/\\C[0-9]+;/g, '')
-    .replace(/\\f[^;]+;/g, '')
-    .replace(/\\W[0-9.]+;/g, '')
-    .replace(/\\Q[0-9.-]+;/g, '')
-    .replace(/\\T[0-9.]+;/g, '')
-    .replace(/\\L/g, '')
-    .replace(/\\l/g, '')
-    .replace(/\\O/g, '')
-    .replace(/\\o/g, '')
-    .replace(/\\K/g, '')
-    .replace(/\\k/g, '')
-    .replace(/\\P/g, ' ')
-    .replace(/\\X/g, ' ')
-    .replace(/\\~[0-9]+/g, '')
-    .replace(/\\[a-zA-Z0-9]+/g, '')
-    .replace(/\{|\}/g, '')
+    .replace(/^[0-9.]+x;/i, '')
+    .replace(/\\+p[a-zA-Z0-9,.:= -]+;/gi, ' ')
+    .replace(/\\+f[^;]+;/gi, '')
+    .replace(/\\+[A-Za-z0-9_#.=-]+;/gi, '')
+    .replace(/\\+S[^;]*;/gi, '')
+    .replace(/\\+[PpXx]/g, ' ')
     .replace(/\^J/g, ' ')
     .replace(/\^M/g, '')
+    .replace(/\\+[a-zA-Z0-9~]/g, '')
+    .replace(/\{|\}/g, '')
+    .replace(/%%c/gi, '⌀')
+    .replace(/%%d/gi, '°')
+    .replace(/%%p/gi, '±')
+    .replace(/%%u/gi, '')
+    .replace(/%%o/gi, '')
+    .replace(/%%%/g, '%')
+    .replace(/\b(?:p?xqc|p?xql|p?xqr)\b/gi, '')
+    .replace(/:\s*\)/g, ')')
+    .replace(/:\s*$/, '')
     .replace(/\s+/g, ' ')
     .trim();
 };
@@ -131,8 +130,8 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
   (dxf.entities || []).forEach(e => {
     if (e.text || e.string) {
       const clean = cleanDxfText(e.text || e.string);
-      const latMatch = clean.match(/(?:N|LAT|LATITUDE)[:\s=]+([2-3]\d\.\d+)/i);
-      const lngMatch = clean.match(/(?:E|LNG|LON|LONGITUDE)[:\s=]+([3-5]\d\.\d+)/i);
+      const latMatch = clean.match(/(?:N|LAT|LATITUDE)[:\s=]+([2-3]\d\.\d+)/i) || clean.match(/([2-3]\d\.\d+)\s*(?:N|LAT)/i);
+      const lngMatch = clean.match(/(?:E|LNG|LON|LONGITUDE)[:\s=]+([3-5]\d\.\d+)/i) || clean.match(/([3-5]\d\.\d+)\s*(?:E|LNG|LON)/i);
       if (latMatch) textDeclaredLat = parseFloat(latMatch[1]);
       if (lngMatch) textDeclaredLng = parseFloat(lngMatch[1]);
     }
@@ -143,6 +142,9 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
 
   const effectiveAnchorLat = textDeclaredLat || anchorLat;
   const effectiveAnchorLng = textDeclaredLng || anchorLng;
+
+  const anchorCadX = (minX <= 0 && maxX >= 0 && minY <= 0 && maxY >= 0 && Math.hypot(geomCenterX, geomCenterY) < 300) ? 0 : geomCenterX;
+  const anchorCadY = (minX <= 0 && maxX >= 0 && minY <= 0 && maxY >= 0 && Math.hypot(geomCenterX, geomCenterY) < 300) ? 0 : geomCenterY;
 
   const crs = preferredCrs || detectSaudiCrs(effectiveAnchorLng, effectiveAnchorLat, { x: geomCenterX, y: geomCenterY });
 
@@ -166,8 +168,8 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
 
     // Local metric grid relative to effective anchor
     const cosLat = Math.cos(effectiveAnchorLat * Math.PI / 180);
-    const relX = x - geomCenterX;
-    const relY = y - geomCenterY;
+    const relX = x - anchorCadX;
+    const relY = y - anchorCadY;
     const lat = effectiveAnchorLat + (relY / 110574.61);
     const lng = effectiveAnchorLng + (relX / (111320 * cosLat));
     return [lat, lng];
@@ -620,7 +622,9 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
     }
   });
 
-  const [centerLat, centerLng] = toLatLng(geomCenterX, geomCenterY);
+  const [centerLat, centerLng] = textDeclaredLat && textDeclaredLng
+    ? [textDeclaredLat, textDeclaredLng]
+    : toLatLng(geomCenterX, geomCenterY);
   if (onProgress) onProgress(100, 'Done');
 
   // Build Layer & Keymap metadata for the client parser
@@ -655,16 +659,18 @@ export async function parseCadClientSide(fileContent, fileName = 'blueprint.dxf'
     keymap,
     detectedMotSigns,
     extractedInfo: {
-      clientNameAr: 'أمانة منطقة المدينة المنورة',
-      projectNameAr: `مشروع اعتماد المخطط المروري - ${fileName}`,
+      clientNameAr: '',
+      clientNameEn: '',
+      projectNameAr: '',
+      projectNameEn: '',
       coordinates: `${centerLat.toFixed(6)}, ${centerLng.toFixed(6)}`,
       latitude: Number(centerLat.toFixed(6)),
       longitude: Number(centerLng.toFixed(6)),
-      speedLimit: 50,
+      speedLimit: '',
       dimensions: {
-        trenchLengthM: 60,
-        trenchWidthM: 4.2,
-        totalDetourLengthM: 290
+        trenchLengthM: '',
+        trenchWidthM: '',
+        totalDetourLengthM: ''
       }
     },
     geojson: {

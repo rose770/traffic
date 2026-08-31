@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Upload, FileCode, CheckCircle2, AlertTriangle, Sparkles,
   MapPin, Shield, Ruler, Layers, ArrowRight, RefreshCw, X,
@@ -9,6 +9,7 @@ import {
 export const CadSmartImportDropzone = ({
   language = 'ar',
   onCadParsed,
+  onCadReset,
   onFieldFocus,
   currentFormData = {},
   isParsed = false,
@@ -22,6 +23,21 @@ export const CadSmartImportDropzone = ({
   const [activeFileName, setActiveFileName] = useState(fileName || '');
   const [extractedInfo, setExtractedInfo] = useState(parsedData?.extractedInfo || null);
   const fileInputRef = useRef(null);
+
+  // Synchronize state whenever parent parsed data or reset status changes
+  useEffect(() => {
+    if (isParsed && parsedData) {
+      setUploadStatus('done');
+      setExtractedInfo(parsedData.extractedInfo || null);
+      setActiveFileName(fileName || parsedData.fileName || '');
+    } else if (!isParsed) {
+      setUploadStatus('idle');
+      setExtractedInfo(null);
+      setActiveFileName('');
+      setErrorMessage('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [isParsed, parsedData, fileName]);
 
   const handleFileUpload = useCallback(async (file) => {
     if (!file) return;
@@ -111,7 +127,10 @@ export const CadSmartImportDropzone = ({
     setActiveFileName('');
     setErrorMessage('');
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+    if (onCadReset) {
+      onCadReset();
+    }
+  }, [onCadReset]);
 
   // Determine missing fields dynamically
   const missingFieldsList = extractedInfo?.missingFieldsRequired?.filter(m => {

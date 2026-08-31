@@ -55,7 +55,17 @@ import {
   ClipboardCheck,
   Bell,
   Signpost,
-  RefreshCw
+  RefreshCw,
+  Terminal,
+  PenTool,
+  ArrowRight,
+  ArrowLeft,
+  DownloadCloud,
+  Award,
+  Undo2,
+  Redo2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 import PreApprovalChecklist from './PreApprovalChecklist';
@@ -72,6 +82,7 @@ import FieldReadinessModal from './FieldReadinessModal';
 import ProcessHomeScreen from './ProcessHomeScreen';
 import DwgMapOverlay from './DwgMapOverlay';
 import CadSmartImportDropzone from './CadSmartImportDropzone';
+import SystemLogsModal from './SystemLogsModal';
 import SixDofNodeInspector from './components/SixDofNodeInspector';
 import SixDofGizmo from './components/SixDofGizmo';
 import GeoreferencedReportModal from './components/GeoreferencedReportModal';
@@ -680,7 +691,7 @@ const ReportSatelliteMapView = ({ permit, language = 'ar' }) => {
   );
 };
 
-const ConstructionPlanningInterface = () => {
+const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
   // ── TEMPORARY DEV BYPASS ──
   // Set to true to skip phase-navigation completeness checks AND the
   // submission-blocking validation gate, so you can click through the app
@@ -1045,6 +1056,15 @@ const ConstructionPlanningInterface = () => {
   const [sharedDwgFileName, setSharedDwgFileName] = useState('');
   const [sharedExtractedInfo, setSharedExtractedInfo] = useState(null);
 
+  const handleCadReset = () => {
+    setSharedDwgData(null);
+    setSharedDwgFileName('');
+    setSharedExtractedInfo(null);
+    setCadFile(null);
+    setCadStatus('idle');
+    setCadMetadata(null);
+  };
+
   const handleCadAutoExtract = (extractedInfo, fullDwgData, fileName) => {
     setSharedDwgData(fullDwgData);
     setSharedDwgFileName(fileName);
@@ -1056,8 +1076,8 @@ const ConstructionPlanningInterface = () => {
         // Phase 1: General Project Details
         clientNameAr: extractedInfo.clientNameAr || prev.clientNameAr || '',
         clientNameEn: extractedInfo.clientNameEn || prev.clientNameEn || '',
-        projectNameAr: extractedInfo.projectNameAr || (extractedInfo.streetNameAr ? `مشروع تحويلة ${extractedInfo.streetNameAr}` : prev.projectNameAr) || '',
-        projectNameEn: extractedInfo.projectNameEn || (extractedInfo.streetNameEn ? `Traffic Detour Plan - ${extractedInfo.streetNameEn}` : prev.projectNameEn) || '',
+        projectNameAr: extractedInfo.projectNameAr || prev.projectNameAr || '',
+        projectNameEn: extractedInfo.projectNameEn || prev.projectNameEn || '',
         contractingCompanyAr: extractedInfo.contractingCompanyAr || prev.contractingCompanyAr || '',
         contractingCompanyEn: extractedInfo.contractingCompanyEn || prev.contractingCompanyEn || '',
         consultantNameAr: extractedInfo.consultantNameAr || prev.consultantNameAr || '',
@@ -1085,7 +1105,7 @@ const ConstructionPlanningInterface = () => {
         trafficVolumeLevel: extractedInfo.trafficVolumeLevel || prev.trafficVolumeLevel || '',
         workDurationCategory: extractedInfo.workDurationCategory || prev.workDurationCategory || '',
         diversionLengthM: extractedInfo.dimensions?.totalDetourLengthM || prev.diversionLengthM || '',
-        pedestrianPathProvided: Boolean(extractedInfo.hasPedestrianPath || prev.pedestrianPathProvided),
+        pedestrianPathProvided: Boolean(extractedInfo.hasPedestrianPath !== undefined ? extractedInfo.hasPedestrianPath : prev.pedestrianPathProvided),
         pedestrianPathWidth: extractedInfo.pedestrianPathWidth || prev.pedestrianPathWidth || '',
 
         // Phase 1: Dimensions & Clearances
@@ -1098,22 +1118,22 @@ const ConstructionPlanningInterface = () => {
         closedLaneWidth: extractedInfo.dimensions?.closedLaneWidthM || prev.closedLaneWidth || '',
         closedLanesCount: extractedInfo.dimensions?.closedLanesCount || prev.closedLanesCount || '',
         activeLanesCount: extractedInfo.dimensions?.activeLanesCount || prev.activeLanesCount || '',
-        activeLanesLeftCount: extractedInfo.dimensions?.activeLanesLeftCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.floor(extractedInfo.dimensions.activeLanesCount / 2)) : prev.activeLanesLeftCount || ''),
-        activeLanesRightCount: extractedInfo.dimensions?.activeLanesRightCount || (extractedInfo.dimensions?.activeLanesCount ? Math.max(1, Math.ceil(extractedInfo.dimensions.activeLanesCount / 2)) : prev.activeLanesRightCount || ''),
-        detourLanesPlacement: extractedInfo.dimensions?.detourLanesPlacement || prev.detourLanesPlacement || (extractedInfo.isMultiLaneDivided ? 'dual' : 'right'),
+        activeLanesLeftCount: extractedInfo.dimensions?.activeLanesLeftCount || prev.activeLanesLeftCount || '',
+        activeLanesRightCount: extractedInfo.dimensions?.activeLanesRightCount || prev.activeLanesRightCount || '',
+        detourLanesPlacement: extractedInfo.dimensions?.detourLanesPlacement || prev.detourLanesPlacement || '',
         totalLanesCount: extractedInfo.dimensions?.totalLanesCount || prev.totalLanesCount || '',
-        stagingAreaAr: extractedInfo.streetNameAr ? `ساحة التشوين والمعدات المعتمدة بالقرب من مسار ${extractedInfo.streetNameAr}` : (prev.stagingAreaAr || ''),
-        stagingAreaEn: extractedInfo.streetNameEn ? `Approved material staging area near ${extractedInfo.streetNameEn}` : (prev.stagingAreaEn || ''),
+        stagingAreaAr: extractedInfo.stagingAreaAr || prev.stagingAreaAr || '',
+        stagingAreaEn: extractedInfo.stagingAreaEn || prev.stagingAreaEn || '',
         hardZoneClassAr: extractedInfo.hardZoneClassAr || prev.hardZoneClassAr || '',
         hardZoneClassEn: extractedInfo.hardZoneClassEn || prev.hardZoneClassEn || '',
 
         // Phase 2: Barrier & Trench Plate Engineering
-        excavationDepth: extractedInfo.dimensions?.trenchDepthM || (prev.excavationDepth || 0),
-        barrierLateralClearance: extractedInfo.barrierLateralClearance || prev.barrierLateralClearance || 0,
-        steelPlateThickness: prev.steelPlateThickness || 0,
-        bearingWidthLeft: prev.bearingWidthLeft || 0,
-        bearingWidthRight: prev.bearingWidthRight || 0,
-        flushMillingDepth: prev.flushMillingDepth || 0,
+        excavationDepth: extractedInfo.dimensions?.trenchDepthM || prev.excavationDepth || '',
+        barrierLateralClearance: extractedInfo.barrierLateralClearance || prev.barrierLateralClearance || '',
+        steelPlateThickness: prev.steelPlateThickness || '',
+        bearingWidthLeft: prev.bearingWidthLeft || '',
+        bearingWidthRight: prev.bearingWidthRight || '',
+        flushMillingDepth: prev.flushMillingDepth || '',
         antiSlipApplied: Boolean(prev.antiSlipApplied),
         mechanicalAnchoring: Boolean(prev.mechanicalAnchoring),
         isArterialRoad: Boolean(extractedInfo.isArterialRoad || prev.isArterialRoad),
@@ -1138,19 +1158,13 @@ const ConstructionPlanningInterface = () => {
         tempBridgesAr: extractedInfo.plans?.tempBridgesAr || prev.tempBridgesAr || '',
         lightingPlanAr: extractedInfo.plans?.lightingPlanAr || prev.lightingPlanAr || '',
         sideStreetsPlanAr: extractedInfo.plans?.sideStreetsPlanAr || prev.sideStreetsPlanAr || '',
-        pedestrianStart: extractedInfo.coordinates ? `محطة 0+050 (${extractedInfo.coordinates})` : (prev.pedestrianStart || ''),
-        pedestrianEnd: extractedInfo.dimensions?.totalDetourLengthM ? `محطة 0+${extractedInfo.dimensions.totalDetourLengthM - 30}` : (prev.pedestrianEnd || ''),
-        vehicleStart: extractedInfo.coordinates ? `محطة 0+000 (${extractedInfo.coordinates})` : (prev.vehicleStart || ''),
-        vehicleEnd: extractedInfo.dimensions?.totalDetourLengthM ? `محطة 0+${extractedInfo.dimensions.totalDetourLengthM}` : (prev.vehicleEnd || ''),
+        pedestrianStart: extractedInfo.pedestrianStart || prev.pedestrianStart || '',
+        pedestrianEnd: extractedInfo.pedestrianEnd || prev.pedestrianEnd || '',
+        vehicleStart: extractedInfo.vehicleStart || prev.vehicleStart || '',
+        vehicleEnd: extractedInfo.vehicleEnd || prev.vehicleEnd || '',
         externalPermitDocName: fileName ? `${fileName} (مخطط الأوتوكاد المعتمد)` : prev.externalPermitDocName,
 
-        fiveWaysStrategy: extractedInfo.zones ? [
-          `1. Advance Warning: Signs placed at 500m.`,
-          `2. Transition Area: Taper length of ${extractedInfo.zones.transition?.lengthM || 180}m utilizing channelizers and illuminated plastic barriers.`,
-          `3. Buffer Space: ${extractedInfo.zones.buffer?.lengthM || 20}m longitudinal safety buffer strictly kept clear.`,
-          `4. Work Area: Excavation length ${extractedInfo.zones.workArea?.lengthM || 60}m (width ${extractedInfo.zones.workArea?.widthM || 4.2}m) protected by solid concrete barriers.`,
-          `5. Termination Area: ${extractedInfo.zones.termination?.lengthM || 30}m downstream taper ending with 'END ROAD WORK' signage.`
-        ].join('\n') : (prev.fiveWaysStrategy || '')
+        fiveWaysStrategy: extractedInfo.fiveWaysStrategy || prev.fiveWaysStrategy || ''
       }));
 
       if (extractedInfo.equipmentList && extractedInfo.equipmentList.length > 0) {
@@ -1233,6 +1247,10 @@ const ConstructionPlanningInterface = () => {
 
   // State for traffic element placements from DWG Map Overlay
   const [dwgPlacements, setDwgPlacements] = useState([]);
+  const [directDrawingTrigger, setDirectDrawingTrigger] = useState(false);
+
+  // State for System Operations & Diagnostics Log Modal
+  const [showLogsModal, setShowLogsModal] = useState(false);
 
   // State for active Traffic redirection zone preview
   const [activeTrafficZone, setActiveTrafficZone] = useState('warning'); // warning, transition, buffer, work, termination
@@ -1296,18 +1314,13 @@ const ConstructionPlanningInterface = () => {
         formData.attenuatorType && 
         (formData.attenuatorType !== 'other' || formData.attenuatorTypeCustomEn || formData.attenuatorTypeCustomAr)
       );
-      const lightingOk = Boolean(
-        formData.hasDetourLightingSensors && 
-        formData.lightingLuxTarget && 
-        formData.lightingAlertChannel
-      );
-      return attenuatorOk && lightingOk;
+      return attenuatorOk;
     }
     if (panelName === 'p1_gantt') {
       return milestones.length > 0;
     }
     if (panelName === 'p2_blueprint') {
-      return cadStatus === 'parsed' || cadFile !== null;
+      return cadStatus === 'parsed' || cadFile !== null || !!sharedDwgData || directDrawingTrigger;
     }
     if (panelName === 'p3_calculator') {
       return parseFloat(formData.proposedTaper) > 0 && 
@@ -1326,9 +1339,7 @@ const ConstructionPlanningInterface = () => {
       return isPanelComplete('p2_blueprint');
     }
     if (phase === 3) {
-      const arterialRequired = getIsArterialTriggered(formData);
-      const arterialOk = !arterialRequired || isPanelComplete('p1_equipment');
-      return isPanelComplete('p3_calculator') && isPanelComplete('p3_auditor') && arterialOk;
+      return isPanelComplete('p3_calculator') && isPanelComplete('p3_auditor');
     }
     return true;
   };
@@ -1948,16 +1959,7 @@ const ConstructionPlanningInterface = () => {
   const isBufferDeviation = parseFloat(formData.proposedBuffer) < calcs.requiredBuffer;
   const isTermDeviation = parseFloat(formData.proposedTermination) < calcs.requiredTermination;
 
-  // Auto-overwrite proposed dimensions when speed limit or lane width changes
-  // Auto-overwrite proposed dimensions when speed limit or lane width changes
-  useEffect(() => {
-    setFormData(prev => ({
-      ...prev,
-      proposedTaper: calcs.requiredTaper,
-      proposedBuffer: calcs.requiredBuffer,
-      proposedTermination: calcs.requiredTermination
-    }));
-  }, [formData.speedLimit, formData.closedLaneWidth]);
+  // Calculations and validations are computed live without overwriting user/CAD inputs
 
   // AI Compliance Audit Engine (with Gap 1, 2, 3 validations)
   const triggerAiAudit = () => {
@@ -4105,7 +4107,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
         </div>
       )}
 
-      <div className="max-w-5xl mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-[1550px] mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden">
         
         {/* Header & Mode Toggles */}
         <div className="bg-gradient-to-r from-brand-dark via-brand-primary to-brand-dark px-8 py-8 border-b-2 border-brand-gold/30">
@@ -4219,6 +4221,19 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
               </div>
 
               <button 
+                type="button"
+                onClick={() => {
+                  if (onNavigateToLogs) onNavigateToLogs();
+                  else setShowLogsModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 border border-teal-500/40 rounded-lg text-xs font-semibold text-teal-400 transition shadow cursor-pointer"
+                title={language === 'ar' ? 'سجل العمليات والتشخيص الفني (/logs)' : 'System Operations & Logs Console (/logs)'}
+              >
+                <Terminal className="h-3.5 w-3.5 text-teal-400" />
+                <span className="hidden sm:inline">{language === 'ar' ? 'سجل النظام (/logs)' : 'System Logs (/logs)'}</span>
+              </button>
+
+              <button 
                 onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
                 className="flex items-center gap-2 px-3 py-1.5 bg-brand-dark-hover/40 hover:bg-brand-dark-hover/70 border border-brand-gold/30 rounded-lg text-xs font-semibold text-brand-gold transition shadow"
               >
@@ -4307,92 +4322,98 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
         {/* -------------------- CONTRACTOR PORTAL VIEW -------------------- */}
         {activePortalMode === 'contractor' && (
           <div className="p-8">
-            
-            {/* Contractor Portal Header \u2014 "My Requests & Directives Log" and
-                "Documents" now live on the Home Screen, so this screen is
-                solely for preparing & submitting a detour plan. */}
-            <div className="flex items-center gap-2 mb-6 bg-slate-100 p-4 rounded-2xl shadow-inner">
-              <Plus className="w-4 h-4 text-brand-primary" />
-              <span className="font-extrabold text-xs text-slate-700">{language === 'ar' ? 'إنشاء وتقديم خطة تحويلة جديدة' : 'Create & Submit Detour Plan'}</span>
-            </div>
-
-            {/* High-Priority Inspector Rejection & Directives Alert Box (LATEST SINGLE UPDATE ONLY) */}
-            {(() => {
-              const flaggedPermits = submittedPermits.filter(p => p.status === 'Rejected' || (p.inspector_notes && p.inspector_notes.trim().length > 0));
-              if (flaggedPermits.length === 0) return null;
-
-              const latestPermit = flaggedPermits[0]; // ONLY show the latest update as an alertbox
-
-              if (dismissedAlertId === latestPermit.id) return null;
-
-              return (
-                <div className="mb-6 relative">
-                  <div className="bg-amber-50/90 border-2 border-amber-400 rounded-2xl p-4 shadow-md text-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
-                    {/* Top Right (X) Dismiss Button */}
-                    <button
-                      type="button"
-                      onClick={() => setDismissedAlertId(latestPermit.id)}
-                      className="absolute top-2.5 right-2.5 p-1 bg-amber-100 hover:bg-amber-200 text-amber-800 hover:text-amber-950 rounded-full transition shadow-sm"
-                      title={language === 'ar' ? 'إغلاق التنبيه' : 'Dismiss Alert'}
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-
-                    <div className="flex items-start gap-3 pr-6">
-                      <div className="p-2 bg-amber-500 text-slate-950 rounded-xl shrink-0 mt-0.5 shadow-sm">
-                        <AlertTriangle className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-xs text-amber-800 uppercase tracking-wide">
-                            {language === 'ar' ? `آخر تحديث عاجل — تصريح رقم #${latestPermit.id}` : `Latest Alert — Permit #${latestPermit.id}`}
-                          </span>
-                          <span className="bg-amber-200/90 text-amber-950 border border-amber-300 font-mono font-bold text-[10px] px-2.5 py-0.5 rounded-full">
-                            {latestPermit.status === 'Rejected' ? (language === 'ar' ? 'مرفوض للتعديل' : 'REJECTED') : (language === 'ar' ? 'توجيه جديد' : 'DIRECTIVE LOGGED')}
-                          </span>
-                        </div>
-                        <h3 className="font-bold text-sm text-slate-900 mt-0.5">
-                          {language === 'ar' ? latestPermit.projectNameAr : latestPermit.projectNameEn}
-                        </h3>
-                        <p className="text-xs text-slate-900 font-sans mt-1.5 bg-white p-3 rounded-xl border border-amber-200 leading-relaxed font-medium shadow-sm">
-                          <span className="font-extrabold text-amber-800">{language === 'ar' ? 'توجيه وملاحظات المفتش الأخيرة:' : 'Latest Inspector Directives:'} </span>
-                          {latestPermit.inspector_notes || (language === 'ar' ? 'تم رفض الخطة المرفقة لعدم استيفاء مسافات التدرج واللوحات التحذيرية المتقدمة.' : 'Request rejected for non-compliance with MOT guidelines.')}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setContractorTab('new_plan');
-                        setCurrentPhase(1);
-                        alert(language === 'ar' ? `تم فتح النموذج لتعديل التصريح رقم #${latestPermit.id} وإعادة التقديم` : `Form opened to modify permit #${latestPermit.id} and resubmit`);
-                      }}
-                      className="shrink-0 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 border border-amber-400"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                      <span>{language === 'ar' ? 'تعديل الخطة وإعادة التقديم' : 'Fix & Resubmit Request'}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-
             <>
             {/* PHASE 1 */}
             {currentPhase === 1 && (
               <div className="space-y-6 animate-fade-in">
                 
-                {/* 0. Top CAD Blueprint Smart Import & Auto-Fill Module */}
-                <CadSmartImportDropzone
-                  language={language}
-                  onCadParsed={handleCadAutoExtract}
-                  onFieldFocus={handleFieldFocus}
-                  currentFormData={formData}
-                  isParsed={!!sharedDwgData}
-                  parsedData={sharedDwgData}
-                  fileName={sharedDwgFileName}
-                />
+                {/* 1.4 CAD Blueprint Preparation Choice (Direct Drawing vs Smart Upload Dropzone) */}
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="p-5 bg-gradient-to-r from-slate-50 to-amber-50/40 border-b border-slate-200 font-bold text-brand-dark text-sm flex items-center justify-between flex-wrap gap-2">
+                    <span className="flex items-center gap-2">
+                      <Compass className="h-5 w-5 text-brand-primary" />
+                      {language === 'ar' ? '١.٤ طريقة إعداد المخطط الهندسي وعناصر الموقع' : '1.4 Blueprint Preparation & Site Drawing Method'}
+                    </span>
+                    <span className="text-[11px] font-bold text-amber-800 bg-amber-100/80 px-3 py-1 rounded-full border border-amber-300">
+                      {language === 'ar' ? '⚡ اختر الطريقة المناسبة: رسم مباشر أو رفع مخطط' : '⚡ Choose: Direct Drawing or Blueprint Upload'}
+                    </span>
+                  </div>
+
+                  <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                      
+                      {/* Option A: Direct Interactive GIS Drawing */}
+                      <div
+                        onClick={() => {
+                          setDirectDrawingTrigger(true);
+                          setCurrentPhase(2);
+                          setExpandedPanels(prev => ({ ...prev, p2_blueprint: true }));
+                        }}
+                        className="border-2 border-amber-500/60 hover:border-amber-500 bg-gradient-to-br from-amber-50/70 to-orange-50/40 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg flex flex-col justify-between group relative overflow-hidden"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
+                              <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-700 group-hover:scale-110 transition-transform">
+                                <PenTool className="w-5 h-5" />
+                              </div>
+                              <span>{language === 'ar' ? '✏️ التخطيط والرسم المباشر على الخريطة' : '✏️ Direct Map Drawing (No File Needed)'}</span>
+                            </div>
+                            <span className="text-[10px] font-bold bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded-full shadow-xs">
+                              {language === 'ar' ? 'بدون ملف كاد' : 'Zero Upload'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                            {language === 'ar'
+                              ? 'افتح الخريطة التفاعلية فوراً وحدد حدود الموقع (أصفر 🟡)، مسار التحويلة (أحمر 🔴)، جدار الحواجز (🧱)، وممر المشاة (أخضر 🟢)، مع إمكانية التراجع والتعديل وتصدير ملف AutoCAD DXF معتمد تلقائياً.'
+                              : 'Open the interactive map immediately to place Site Boundary (Yellow 🟡), Detour Transition (Red 🔴), Barrier Wall (🧱), and Pedestrian Route (Green 🟢) with undo/redo and certified DXF export.'}
+                          </p>
+                        </div>
+                        <div className="mt-5 pt-3 border-t border-amber-200/80 flex items-center justify-between text-xs font-black text-amber-900">
+                          <span>{language === 'ar' ? 'بدء الرسم المباشر على الخريطة ⚡' : 'Launch Direct Interactive Drawing ⚡'}</span>
+                          <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
+                        </div>
+                      </div>
+
+                      {/* Option B: Smart CAD Ingestion & Auto-Fill */}
+                      <div className="border-2 border-blue-500/40 hover:border-blue-500 bg-gradient-to-br from-blue-50/50 to-slate-50/80 rounded-2xl p-5 transition-all hover:shadow-lg flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-slate-900 font-extrabold text-sm">
+                              <div className="w-9 h-9 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-600">
+                                <Upload className="w-5 h-5" />
+                              </div>
+                              <span>{language === 'ar' ? '📁 استيراد وتحليل مخطط أوتوكاد جاهز' : '📁 Smart AutoCAD Ingestion (DWG/DXF)'}</span>
+                            </div>
+                            <span className="text-[10px] font-bold bg-blue-600 text-white px-2.5 py-0.5 rounded-full shadow-xs">
+                              {language === 'ar' ? 'تعبئة تلقائية' : 'Auto-Fill'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                            {language === 'ar'
+                              ? 'اسحب وأفلت مخطط الأوتوكاد (DWG أو DXF) لاستخراج اسم الشارع، أطوال التحويلة، أبعاد الحفر، واللوحات المرورية ومطابقتها مكانياً بنظام UTM 37N.'
+                              : 'Drag & drop consultant AutoCAD blueprint to automatically extract road names, excavation bounds, detour lengths, and MOT signage with georeferencing.'}
+                          </p>
+                        </div>
+
+                        {/* Direct Dropzone Widget embedded inside Option B */}
+                        <div className="mt-4">
+                          <CadSmartImportDropzone
+                            language={language}
+                            onCadParsed={handleCadAutoExtract}
+                            onCadReset={handleCadReset}
+                            onFieldFocus={handleFieldFocus}
+                            currentFormData={formData}
+                            isParsed={!!sharedDwgData}
+                            parsedData={sharedDwgData}
+                            fileName={sharedDwgFileName}
+                          />
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                </div>
 
                 {/* 1. General Project Details Panel */}
 
@@ -5079,6 +5100,9 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         anchorLng={sharedDwgData?.centerLatLng?.[1] || 39.6120}
                         roadName={formData.roadNameAr || formData.roadNameEn}
                         preloadedDwgData={sharedDwgData}
+                        autoStartDirectDrawing={directDrawingTrigger}
+                        onCadParsed={handleCadAutoExtract}
+                        onCadReset={handleCadReset}
                       />
                     </div>
                   )}
@@ -5400,39 +5424,6 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             {/* PHASE 3 */}
             {currentPhase === 3 && (
               <div className="space-y-6 animate-fade-in">
-                
-                {/* Unified CAD-Derived Auto-Population Banner */}
-                {sharedDwgData && (
-                  <div className="bg-gradient-to-r from-slate-900 to-slate-950 p-4 rounded-xl text-white border border-slate-800 shadow-md flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-brand-primary/20 border border-brand-primary/40 flex items-center justify-center text-brand-gold">
-                        <Sparkles className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs flex items-center gap-2">
-                          <span>{language === 'ar' ? 'حسابات ومسافات الأمان مستوردة من المخطط (CAD Ingestion Active)' : 'CAD-Driven Zone Dimensions Active'}</span>
-                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-400/30">
-                            ✓ {sharedDwgFileName}
-                          </span>
-                        </div>
-                        <p className="text-[10.5px] text-slate-400 mt-0.5">
-                          {language === 'ar'
-                            ? `طول التحويلة: ${formData.diversionLengthM || 1032}م • التدرج L: ${formData.proposedTaper || 250}م • الأمان: ${formData.proposedBuffer || 50}م • السرعة: ${formData.speedLimit || 50} كم/س`
-                            : `Detour Length: ${formData.diversionLengthM || 1032}m • Taper: ${formData.proposedTaper || 250}m • Buffer: ${formData.proposedBuffer || 50}m • Speed: ${formData.speedLimit || 50}km/h`}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowGeoreferencedReport(true)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>{language === 'ar' ? 'تصدير تقرير الاعتماد 6-DOF' : 'Export 6-DOF Report'}</span>
-                    </button>
-                  </div>
-                )}
-
                 {/* 1. Detour calculator */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
@@ -5624,25 +5615,96 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       </div>
 
 
-                      <div className="flex flex-col gap-3 mt-4 p-4 bg-brand-light/30 border border-brand-primary/20 rounded-xl">
-                        <div>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" name="impactAttenuators" checked={formData.impactAttenuators} onChange={(e) => setFormData(prev => ({...prev, impactAttenuators: e.target.checked}))} className="w-4 h-4 text-brand-primary border-slate-300 rounded focus:ring-brand-primary" />
-                            <span className="text-xs font-bold text-brand-text-dark">{language === 'ar' ? 'مصدات صدمات للطرق السريعة (Crash Cushions / Attenuators)' : 'Impact Attenuators (Crash Cushions) for Arterial Roads'}</span>
-                          </label>
-                          {formData.speedLimit >= 80 && !formData.impactAttenuators && (
-                            <div className="mt-2 text-[10px] text-red-600 font-bold bg-red-50 p-2 rounded flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" />
-                              {language === 'ar' ? 'تحذير هندسي: سرعة الطريق ٨٠كم/س أو أعلى، يجب تركيب مصدات لتخفيف صدمات الانحراف.' : 'Warning: Speed is 80+ km/h. Attenuators are highly recommended to mitigate high-speed crashes.'}
+                      {/* Arterial Road Crash Attenuators Card */}
+                      <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4 shadow-xs">
+                        <div className="flex items-start gap-3">
+                          <input 
+                            type="checkbox" 
+                            id="isArterialRoad"
+                            name="isArterialRoad" 
+                            checked={Boolean(formData.isArterialRoad || formData.impactAttenuators)} 
+                            onChange={(e) => {
+                              const val = e.target.checked;
+                              setFormData(prev => ({ 
+                                ...prev, 
+                                isArterialRoad: val, 
+                                impactAttenuators: val,
+                                attenuatorType: val ? (prev.attenuatorType || 'mash_tl3') : prev.attenuatorType
+                              }));
+                            }} 
+                            className="mt-0.5 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer" 
+                          />
+                          <div>
+                            <label htmlFor="isArterialRoad" className="text-xs font-bold text-brand-dark uppercase cursor-pointer block">
+                              {language === 'ar' ? 'مصدات صدمات الطرق الشريانية (Arterial Road Crash Attenuators)' : 'ARTERIAL ROAD CRASH ATTENUATORS'}
+                            </label>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {language === 'ar'
+                                ? 'الطرق الشريانية ذات السرعات العالية أو الكثافة المرورية يجب تزويدها بمصدات صدمات معتمدة (ممتصات صدمات) عند تدرج التحويلة.'
+                                : 'Arterial roads with high design speeds or heavy traffic volumes must be equipped with certified crash attenuators (impact absorbers) at transition tapers.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {(formData.isArterialRoad || formData.impactAttenuators) && (
+                          <div className="pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase">
+                                  {language === 'ar' ? 'نوع ومواصفة مصد الصدمات *' : 'CRASH ATTENUATOR MODEL / TYPE *'}
+                                </label>
+                                <select
+                                  name="attenuatorType"
+                                  value={formData.attenuatorType || 'mash_tl3'}
+                                  onChange={handleInputChange}
+                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary bg-white"
+                                >
+                                  <option value="mash_tl3">{language === 'ar' ? 'MASH TL-3 QuadGuard Structural Attenuator' : 'MASH TL-3 QuadGuard Structural Attenuator'}</option>
+                                  <option value="water_filled">{language === 'ar' ? 'حواجز مائية ماصة للصدمات (Water-Filled Energy Absorbing Barrier)' : 'Water-Filled Energy Absorbing Barrier'}</option>
+                                  <option value="tma_truck">{language === 'ar' ? 'مصدات شاحنات متحركة TMA (Truck Mounted Attenuator)' : 'Truck Mounted Attenuator (TMA)'}</option>
+                                  <option value="steel_cushion">{language === 'ar' ? 'وسائد صدمات فولاذية (Steel CushionGuard Crash Attenuator)' : 'Steel CushionGuard Crash Attenuator'}</option>
+                                  <option value="other">{language === 'ar' ? 'أخرى (أدخل يدوياً)...' : 'Other (Enter manually)...'}</option>
+                                </select>
+
+                                {formData.attenuatorType === 'other' && (
+                                  <input
+                                    type="text"
+                                    name="attenuatorTypeCustomEn"
+                                    value={formData.attenuatorTypeCustomEn}
+                                    onChange={handleInputChange}
+                                    placeholder={language === 'ar' ? 'أدخل مواصفة مصد الصدمات هنا...' : 'Enter custom attenuator specs...'}
+                                    className="w-full mt-2 border border-slate-300 rounded p-2 text-xs bg-white"
+                                  />
+                                )}
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase">
+                                  {language === 'ar' ? 'عدد ومواقع التثبيت' : 'QUANTITY & INSTALLATION PLACEMENT'}
+                                </label>
+                                <input
+                                  type="text"
+                                  name="attenuatorQuantityPlacement"
+                                  value={formData.attenuatorQuantityPlacement}
+                                  onChange={handleInputChange}
+                                  placeholder={language === 'ar' ? 'مثال: وحدتان عند بداية منطقة التدرج وبداية منطقة الأمان' : 'e.g., 2 units at transition taper start'}
+                                  className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono bg-white"
+                                />
+                              </div>
                             </div>
-                          )}
-                        </div>
-                        <div>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" name="smartLightingSensors" checked={formData.smartLightingSensors} onChange={(e) => setFormData(prev => ({...prev, smartLightingSensors: e.target.checked}))} className="w-4 h-4 text-brand-primary border-slate-300 rounded focus:ring-brand-primary" />
-                            <span className="text-xs font-bold text-brand-text-dark">{language === 'ar' ? 'مستشعرات إضاءة ذكية مع إشعارات أعطال لاسلكية' : 'Smart Lighting with Wireless Outage Sensor Notifications'}</span>
-                          </label>
-                        </div>
+                          </div>
+                        )}
+
+                        {(parseFloat(formData.speedLimit) >= 80 || formData.roadClassification === 'arterial' || formData.roadClassification === 'main') && !formData.impactAttenuators && !formData.isArterialRoad && (
+                          <div className="mt-2 text-[10px] text-red-600 font-bold bg-red-50 border border-red-200 p-2 rounded flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span>
+                              {language === 'ar'
+                                ? 'تحذير هندسي: سرعة الطريق ٨٠ كم/س أو أعلى، يجب تركيب مصدات لتخفيف صدمات الانحراف وفق كود الطرق ٣٠٥.'
+                                : 'Engineering Warning: Design speed is 80+ km/h. Crash attenuators are required at transition tapers per Saudi Road Code 305.'}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Gap 2: Deterministic Barrier Selection Engine Card */}
@@ -5758,257 +5820,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-                {/* 3. Relocated Section 1.3: Arterial Road Crash Protection & Smart Detour Lighting (Mandatory when triggered per Saudi Road Code 305) */}
-                {(() => {
-                  const isTriggered = getIsArterialTriggered(formData);
-                  const isSectionComplete = isPanelComplete('p1_equipment');
-                  const start = formData.workStartDate ? new Date(formData.workStartDate) : null;
-                  const end = formData.workEndDate ? new Date(formData.workEndDate) : null;
-                  const calculatedHours = (start && end) ? Math.max(0, (end - start) / (1000 * 60 * 60)) : 0;
-                  const isArterialRoadClass = formData.roadClassification === 'main' || formData.roadClassification === 'arterial';
-                  const isHighSpeed = parseFloat(formData.speedLimit) >= 80;
-                  const isLongTerm = formData.workDurationCategory === 'long' || calculatedHours > 72;
-                  const isLongDetour = parseFloat(formData.diversionLengthM) > 400;
-
-                  return (
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                      <button
-                        type="button"
-                        onClick={() => togglePanel('p1_equipment')}
-                        className={`w-full flex items-center justify-between p-5 border-b border-slate-200 font-bold text-sm transition-all ${
-                          isTriggered && !isSectionComplete ? 'bg-red-50/50 text-red-900' : 'bg-slate-50 text-brand-dark hover:bg-slate-100/50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Shield className={`h-4.5 w-4.5 ${isTriggered ? 'text-red-600' : 'text-brand-primary'}`} />
-                          <span>
-                            {language === 'ar' ? '٣.٣ تجهيزات سلامة الطرق الشريانية وإدارة إضاءة التحويلة' : '3.3 Arterial Road Safety & Smart Detour Lighting'}
-                          </span>
-                          {isTriggered ? (
-                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 border ${
-                              isSectionComplete 
-                                ? 'bg-emerald-500/20 text-emerald-800 border-emerald-500/30' 
-                                : 'bg-red-500/20 text-red-700 border-red-500/30 animate-pulse'
-                            }`}>
-                              <AlertTriangle className="w-3 h-3 text-red-600" />
-                              {language === 'ar' ? 'إلزامي وفق كود الطرق ٣٠٥' : 'Mandatory per Saudi Road Code 305'}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-normal">
-                              {language === 'ar' ? 'اختياري' : 'Optional'}
-                            </span>
-                          )}
-                        </div>
-                        {expandedPanels.p1_equipment ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </button>
-
-                      {expandedPanels.p1_equipment && (
-                        <div className="p-5 space-y-6 animate-fade-in">
-                          {/* Saudi Road Code 305 Guideline Evaluation Notice */}
-                          {isTriggered && (
-                            <div className={`border rounded-xl p-3.5 text-xs space-y-1.5 ${
-                              isSectionComplete ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' : 'bg-red-50/90 border-red-200 text-red-900'
-                            }`}>
-                              <div className="font-bold flex items-center gap-1.5">
-                                <AlertTriangle className={`w-4 h-4 ${isSectionComplete ? 'text-emerald-600' : 'text-red-600'}`} />
-                                <span>
-                                  {language === 'ar'
-                                    ? 'متطلب إلزامي وفق كود الطرق السعودي (Part 305):'
-                                    : 'Mandatory Requirement per Saudi Road Code (Part 305):'}
-                                </span>
-                              </div>
-                              <ul className="list-disc list-inside text-[11px] space-y-0.5 font-sans pl-2">
-                                {isArterialRoadClass && (
-                                  <li>{language === 'ar' ? 'تصنيف الطريق: رئيسي / شرياني / سريع (Arterial / Expressway).' : 'Road Classification: Main / Arterial / Expressway.'}</li>
-                                )}
-                                {isHighSpeed && (
-                                  <li>{language === 'ar' ? `سرعة الطريق التصميمية: ${formData.speedLimit} كم/س (≥ ٨٠ كم/س).` : `Design Speed: ${formData.speedLimit} km/h (≥ 80 km/h).`}</li>
-                                )}
-                                {isLongTerm && (
-                                  <li>{language === 'ar' ? `مدة الأعمال: ${Math.round(calculatedHours)} ساعة (طويلة المدى > ٧٢ ساعة).` : `Work Duration: ${Math.round(calculatedHours)} hours (Long-term > 72h).`}</li>
-                                )}
-                                {isLongDetour && (
-                                  <li>{language === 'ar' ? `طول التحويلة: ${formData.diversionLengthM}م (> ٤٠٠م).` : `Diversion Length: ${formData.diversionLengthM}m (> 400m).`}</li>
-                                )}
-                              </ul>
-                              <span className="block text-[10px] font-bold mt-1">
-                                {isSectionComplete
-                                  ? (language === 'ar' ? '✓ تم استيفاء متطلبات كود الطرق ٣٠٥ بنجاح.' : '✓ Saudi Road Code 305 requirements successfully met.')
-                                  : (language === 'ar' ? '⚠️ استكمال هذا البند إلزامي ومطلوب لتقديم طلب الاعتماد.' : '⚠️ Completing this section is mandatory to submit the detour permit.')}
-                              </span>
-                            </div>
-                          )}
-
-                          {/* Point 1: Arterial Road & Crash Attenuators */}
-                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                            <div className="flex items-start gap-3">
-                              <input 
-                                type="checkbox"
-                                id="isArterialRoad"
-                                name="isArterialRoad"
-                                checked={formData.isArterialRoad}
-                                onChange={(e) => setFormData(prev => ({ ...prev, isArterialRoad: e.target.checked, impactAttenuators: e.target.checked }))}
-                                className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
-                              />
-                              <div>
-                                <label htmlFor="isArterialRoad" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
-                                  {language === 'ar' ? 'طريق شرياني رئيسي ومصدات صدمات (Arterial Crash Attenuators)' : 'Arterial Road Crash Attenuators'}
-                                  {isTriggered && <span className="text-red-500 font-bold ml-1">*</span>}
-                                </label>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {language === 'ar' 
-                                    ? 'الطرق الشريانية الرئيسية التي تتميز بسرعات عالية أو كثافة مرورية يجب تزويدها بمصدات صدمات معتمدة (Crash Attenuators / Impact Absorbers) لتأمين تدرج التحويلة.' 
-                                    : 'Arterial roads with high design speeds or heavy traffic volumes must be equipped with certified crash attenuators (impact absorbers) at transition tapers.'}
-                                </p>
-                              </div>
-                            </div>
-
-                            {formData.isArterialRoad && (
-                              <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">
-                                      {language === 'ar' ? 'نوع ومواصفة مصد الصدمات (Impact Absorber Model)' : 'Crash Attenuator Model / Type'}
-                                      <span className="text-red-500 font-bold ml-1">*</span>
-                                    </label>
-                                    <select
-                                      name="attenuatorType"
-                                      value={formData.attenuatorType}
-                                      onChange={handleInputChange}
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                    >
-                                      <option value="mash_tl3">{language === 'ar' ? 'مصدات صدمات هيكلية MASH TL-3 QuadGuard' : 'MASH TL-3 QuadGuard Structural Attenuator'}</option>
-                                      <option value="water_filled">{language === 'ar' ? 'حواجز مائية ماصة للصدمات (Water-Filled Absorber)' : 'Water-Filled Energy Absorbing Barrier'}</option>
-                                      <option value="tma_truck">{language === 'ar' ? 'مصدات صدمات شاحنات متحركة TMA (Truck Mounted Attenuator)' : 'Truck Mounted Attenuator (TMA)'}</option>
-                                      <option value="steel_cushion">{language === 'ar' ? 'وسائد صدمات فولاذية عالية الامتصاص' : 'Steel CushionGuard Crash Attenuator'}</option>
-                                      <option value="other">{language === 'ar' ? 'أخرى (أدخل يدوياً)...' : 'Other (Enter manually)...'}</option>
-                                    </select>
-
-                                    {formData.attenuatorType === 'other' && (
-                                      <input
-                                        type="text"
-                                        name="attenuatorTypeCustomEn"
-                                        value={formData.attenuatorTypeCustomEn}
-                                        onChange={handleInputChange}
-                                        placeholder={language === 'ar' ? 'أدخل مواصفة مصد الصدمات هنا...' : 'Enter custom attenuator specs...'}
-                                        className="w-full mt-2 border border-slate-300 rounded p-2 text-xs"
-                                      />
-                                    )}
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">
-                                      {language === 'ar' ? 'عدد ومواقع التثبيت (Quantity & Placement)' : 'Quantity & Installation Placement'}
-                                    </label>
-                                    <input
-                                      type="text"
-                                      name="attenuatorQuantityPlacement"
-                                      value={formData.attenuatorQuantityPlacement}
-                                      onChange={handleInputChange}
-                                      placeholder={language === 'ar' ? 'مثال: وحدتان عند بداية منطقة التدرج وبداية منطقة الأمان' : 'e.g., 2 units at transition taper start'}
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Point 2: Detour Lighting Sensors & Dedicated Platform Integration */}
-                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                            <div className="flex items-start gap-3">
-                              <input 
-                                type="checkbox"
-                                id="hasDetourLightingSensors"
-                                name="hasDetourLightingSensors"
-                                checked={formData.hasDetourLightingSensors}
-                                onChange={(e) => setFormData(prev => ({ ...prev, hasDetourLightingSensors: e.target.checked, smartLightingSensors: e.target.checked }))}
-                                className="mt-1 w-5 h-5 text-brand-primary border-slate-300 rounded focus:ring-brand-primary cursor-pointer"
-                              />
-                              <div>
-                                <label htmlFor="hasDetourLightingSensors" className="block text-xs font-bold text-brand-dark uppercase cursor-pointer">
-                                  {language === 'ar' ? 'مستشعرات إضاءة التحويلة وإدارة الانقطاع الآلي' : 'Detour Lighting Sensors & Automated Outage Telemetry'}
-                                  {isTriggered && <span className="text-red-500 font-bold ml-1">*</span>}
-                                </label>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {language === 'ar' 
-                                    ? 'يجب تزويد إضاءة التحويلة بمستشعرات لاسلكية لإشعارات الأعطال الفورية والانقطاعات مع الربط المباشر بالمنصة المركزية لإدارة إضاءة التحويلات.' 
-                                    : 'Detour lighting must feature wireless outage sensors and real-time integration with the dedicated detour lighting management platform.'}
-                                </p>
-                              </div>
-                            </div>
-
-                            {formData.hasDetourLightingSensors && (
-                              <div className="ml-8 pt-3 border-t border-slate-200 space-y-4 animate-fade-in">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">
-                                      {language === 'ar' ? 'مستوى الإضاءة الأدنى المطلوب (Target Illumination Lux)' : 'Target Illumination (Lux Level)'}
-                                      <span className="text-red-500 font-bold ml-1">*</span>
-                                    </label>
-                                    <select
-                                      name="lightingLuxTarget"
-                                      value={formData.lightingLuxTarget}
-                                      onChange={handleInputChange}
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                    >
-                                      <option value="150">150 Lux - {language === 'ar' ? 'المعيار القياسي لأعمال التحويلات الليلية' : 'Standard Night Work Zone'}</option>
-                                      <option value="200">200 Lux - {language === 'ar' ? 'المناطق عالية الخطورة والطرق السريعة' : 'High Risk Highway Corridor'}</option>
-                                      <option value="100">100 Lux - {language === 'ar' ? 'ممرات المشاة والتحويلات الفرعية' : 'Pedestrian & Minor Detours'}</option>
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'المسافة بين أبراج الإضاءة (Tower Light Spacing)' : 'Tower Light Spacing (m)'}</label>
-                                    <input
-                                      type="text"
-                                      name="lightingTowerSpacing"
-                                      value={formData.lightingTowerSpacing}
-                                      onChange={handleInputChange}
-                                      placeholder="e.g., 25m or 30m"
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">
-                                      {language === 'ar' ? 'قناة التنبيه والربط اللاسلكي (Outage Telemetry Channel)' : 'Outage Telemetry Platform Channel'}
-                                      <span className="text-red-500 font-bold ml-1">*</span>
-                                    </label>
-                                    <select
-                                      name="lightingAlertChannel"
-                                      value={formData.lightingAlertChannel}
-                                      onChange={handleInputChange}
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-semibold focus:ring-brand-primary"
-                                    >
-                                      <option value="central_platform">{language === 'ar' ? 'المنصة الرقمية لإدارة إضاءة التحويلات (Lighting API)' : 'Dedicated Detour Lighting Platform'}</option>
-                                      <option value="sms_gateway">{language === 'ar' ? 'بوابة التنبيه الفوري SMS / IoT Cellular Gateway' : 'Cellular IoT SMS Outage Gateway'}</option>
-                                      <option value="scada">{language === 'ar' ? 'ربط غرفة التحكم والإنذار المركزي (SCADA Platform)' : 'Central SCADA Control Room Platform'}</option>
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase">{language === 'ar' ? 'مولد الإضاءة الاحتياطي للطوارئ (Emergency Backup Power)' : 'Emergency Backup Generator'}</label>
-                                    <input
-                                      type="text"
-                                      name="lightingBackupPower"
-                                      value={formData.lightingBackupPower}
-                                      onChange={handleInputChange}
-                                      placeholder="e.g., 15 kVA Silent Automatic Generator"
-                                      className="w-full mt-1.5 border border-slate-300 rounded p-2 text-xs font-mono"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* 4. Gap 4: Site Photo Stream & GPS 25m Interval Parser */}
+                {/* 3. Site Photo Stream & GPS 25m Interval Parser */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                   <button
                     type="button"
@@ -6017,7 +5829,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   >
                     <span className="flex items-center gap-2">
                       <Globe className="h-4.5 w-4.5 text-teal-600" />
-                      {language === 'ar' ? '٣.٤ توثيق الصور الميدانية المكانية (تباعد ≤ ٢٥م)' : '3.4 Geotagged Photo Intake (≤ 25m Spatial Interval)'}
+                      {language === 'ar' ? '٣.٣ توثيق الصور الميدانية المكانية (تباعد ≤ ٢٥م)' : '3.3 Geotagged Photo Intake (≤ 25m Spatial Interval)'}
                     </span>
                     {expandedPanels.p3_photos ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
@@ -6320,7 +6132,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       <button
                         onClick={() => setListPanelOpen(false)}
                         title={language === 'ar' ? 'إخفاء القائمة لتوسيع مساحة العرض' : 'Collapse list for more space'}
-                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0"
+                        className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0 cursor-pointer"
                       >
                         <ChevronLeft className="w-4 h-4" />
                       </button>
@@ -6337,7 +6149,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           <button
                             key={permit.id}
                             onClick={() => { setSelectedPermitForReview(permit); setListPanelOpen(false); }}
-                            className={`w-full text-left p-3.5 rounded-lg border transition-all flex flex-col gap-1.5 ${
+                            className={`w-full text-left p-3.5 rounded-lg border transition-all flex flex-col gap-1.5 cursor-pointer ${
                               isSelected
                                 ? 'bg-amber-50 border-amber-500 ring-1 ring-amber-500'
                                 : 'bg-slate-50 hover:bg-slate-100/70 border-slate-200'
@@ -6365,7 +6177,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                     <button
                       onClick={() => setListPanelOpen(true)}
                       title={language === 'ar' ? 'إظهار قائمة الطلبات' : 'Show requests list'}
-                      className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold"
+                      className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold cursor-pointer"
                     >
                       <ChevronRight className="w-4 h-4 shrink-0" />
                       <span className="text-center leading-tight">{language === 'ar' ? 'طلبات التراخيص' : 'Permit Requests'}</span>
@@ -6419,14 +6231,14 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               onClick={() => downloadOfficialPermitFile(selectedPermitForReview)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition shadow"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded transition shadow cursor-pointer"
                             >
                               <Download className="h-3.5 w-3.5" />
                               <span>{language === 'ar' ? 'تحميل ملف التصريح الرسمي' : 'Download Official Permit'}</span>
                             </button>
                             <button
                               onClick={() => downloadUploadedCadFile(selectedPermitForReview)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded transition shadow"
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded transition shadow cursor-pointer"
                             >
                               <Download className="h-3.5 w-3.5 text-brand-gold" />
                               <span>{language === 'ar' ? 'تحميل مخطط الـ CAD المرفوع' : 'Download Uploaded CAD File'}</span>
@@ -6453,7 +6265,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             <a
                               href={selectedPermitForReview.externalPermitDocument}
                               download={selectedPermitForReview.externalPermitDocName || 'Official_External_Permit.pdf'}
-                              className="px-3 py-1.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-xs rounded-lg transition flex items-center gap-1 shadow-sm"
+                              className="px-3 py-1.5 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold text-xs rounded-lg transition flex items-center gap-1 shadow-sm cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>{language === 'ar' ? 'تحميل التصريح' : 'Download File'}</span>
@@ -6466,9 +6278,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           )}
                         </div>
 
-                        {/* Comment box + Approve / Reject decision — the external
-                            coordinator's job only. Inspectors can see the
-                            request here but cannot approve/reject it themselves. */}
+                        {/* Comment box + Approve / Reject decision */}
                         {activePortalMode === 'external_entity' ? (
                           <div className="border border-slate-200 rounded-xl overflow-hidden">
                             <div className="bg-slate-50 border-b border-slate-200 p-3 font-bold text-xs text-slate-700 flex items-center gap-2">
@@ -6485,14 +6295,14 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                               <div className="flex flex-wrap gap-3">
                                 <button
                                   onClick={() => handleUpdatePermitStatus('Clean')}
-                                  className="flex-1 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow"
+                                  className="flex-1 bg-brand-primary hover:bg-brand-primary-hover text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow cursor-pointer"
                                 >
                                   <CheckCircle2 className="w-4 h-4" />
                                   {language === 'ar' ? 'اعتماد ومتابعة للمفتش' : 'Approve & Forward to Inspector'}
                                 </button>
                                 <button
                                   onClick={() => handleUpdatePermitStatus('Rejected')}
-                                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow"
+                                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5 text-xs shadow cursor-pointer"
                                 >
                                   <X className="w-4 h-4" />
                                   {language === 'ar' ? 'رفض الطلب' : 'Reject Request'}
@@ -6506,7 +6316,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                             <span>
                               {language === 'ar'
                                 ? 'هذا الطلب بانتظار قرار المنسق الخارجي. الاعتماد أو الرفض من اختصاص الجهة الخارجية فقط، وسيظهر الطلب في صندوق الوارد بعد اعتماده.'
-                                : 'This request is awaiting the External Coordinator\u2019s decision. Approving or rejecting it is the External Coordinator\u2019s responsibility only — it will appear in your Inbox once approved.'}
+                                : 'This request is awaiting the External Coordinator’s decision. Approving or rejecting it is the External Coordinator’s responsibility only — it will appear in your Inbox once approved.'}
                             </span>
                           </div>
                         )}
@@ -6536,7 +6346,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   <button
                     onClick={() => setListPanelOpen(false)}
                     title={language === 'ar' ? 'إخفاء القائمة لتوسيع مساحة العرض' : 'Collapse list for more space'}
-                    className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0"
+                    className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition shrink-0 cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -6550,7 +6360,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                     return (
                       <button
                         key={permit.id}
-                        onClick={() => { setSelectedPermitForReview(permit); setListPanelOpen(false); }}
+                        onClick={() => setSelectedPermitForReview(permit)}
                         className={`w-full text-left p-3.5 rounded-lg border transition-all flex flex-col gap-1.5 ${
                           isSelected 
                             ? 'bg-brand-primary/10 border-brand-primary ring-1 ring-brand-primary' 
@@ -6581,7 +6391,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                 <button
                   onClick={() => setListPanelOpen(true)}
                   title={language === 'ar' ? 'إظهار قائمة الطلبات' : 'Show requests list'}
-                  className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold"
+                  className="flex lg:flex-col items-center justify-center gap-2 bg-white border border-slate-200 rounded-xl p-3 shadow-sm sticky top-24 hover:bg-slate-50 hover:border-brand-primary/40 transition text-slate-500 hover:text-brand-primary text-xs font-bold cursor-pointer"
                 >
                   <ChevronRight className="w-4 h-4 shrink-0" />
                   <span className="text-center leading-tight">{language === 'ar' ? 'طلبات التراخيص' : 'Permit Requests'}</span>
@@ -7542,6 +7352,13 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             </div>
           </div>
         )}
+
+        {/* System Operations & Diagnostics Log Modal */}
+        <SystemLogsModal 
+          isOpen={showLogsModal} 
+          onClose={() => setShowLogsModal(false)} 
+          language={language} 
+        />
 
       </div>
     );

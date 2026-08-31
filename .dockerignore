@@ -1,0 +1,17 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite
+database.sqlite
+.env
+.git/
+.gitignore
+.vscode/
+.idea/
+scratch/

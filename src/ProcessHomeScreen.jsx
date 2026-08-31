@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, BookOpen, ArrowRight, Shield, FileText, FileSignature, ShieldCheck, ClipboardCheck, FileCheck, Wrench, Activity, Trash2, Building2, Globe } from 'lucide-react';
+import { X, BookOpen, ArrowRight, Shield, FileText, FileSignature, ShieldCheck, ClipboardCheck, FileCheck, Wrench, Activity, Trash2, Building2, Globe, AlertTriangle, Edit3 } from 'lucide-react';
 import TrafficReferenceGuide from './TrafficReferenceGuide';
 
 // The 5 official stages, straight from the source requirements document
@@ -95,6 +95,7 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
   const [guideOpen, setGuideOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [dismissedAlertId, setDismissedAlertId] = useState(null);
 
   // Step 1 (Prepare & Submit) is explicitly the contractor's job in the
   // source document — an inspector never performs it, so it's hidden
@@ -111,14 +112,14 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
   const rejectedCount = myPermits.filter(p => p.status === 'Rejected').length;
 
   return (
-    <div className="min-h-screen bg-brand-light text-brand-text-dark py-10 px-4 sm:px-6 lg:px-8 font-sans" dir={isArabic ? 'rtl' : 'ltr'}>
-      <div className="max-w-5xl mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen bg-brand-light text-brand-text-dark py-8 px-3 sm:px-6 lg:px-8 font-sans" dir={isArabic ? 'rtl' : 'ltr'}>
+      <div className="w-full max-w-[1550px] mx-auto bg-brand-light-card border border-brand-primary/10 rounded-2xl shadow-2xl overflow-hidden">
 
         <div className="bg-gradient-to-r from-brand-dark via-brand-primary to-brand-dark px-8 py-8 border-b-2 border-brand-gold/30">
           <div className="flex justify-end mb-4">
             <button
               onClick={onToggleLanguage}
-              className="flex items-center gap-2 px-3 py-1.5 bg-brand-dark-hover/40 hover:bg-brand-dark-hover/70 border border-brand-gold/30 rounded-lg text-xs font-semibold text-brand-gold transition shadow"
+              className="flex items-center gap-2 px-3 py-1.5 bg-brand-dark-hover/40 hover:bg-brand-dark-hover/70 border border-brand-gold/30 rounded-lg text-xs font-semibold text-brand-gold transition shadow cursor-pointer"
             >
               <Globe className="h-3.5 w-3.5" />
               <span>{isArabic ? 'English' : 'العربية'}</span>
@@ -138,7 +139,62 @@ const ProcessHomeScreen = ({ language, onToggleLanguage, userRole, formData, cal
           </p>
         </div>
 
-        <div className="p-6 sm:p-8 space-y-8">
+        <div className="p-6 sm:p-8 space-y-6">
+          {/* High-Priority Inspector Rejection & Directives Alert Box — appears FIRST THING after login */}
+          {userRole !== 'inspector' && (() => {
+            const flaggedPermits = myPermits.filter(p => p.status === 'Rejected' || (p.inspector_notes && p.inspector_notes.trim().length > 0));
+            if (flaggedPermits.length === 0) return null;
+            const latestPermit = flaggedPermits[0];
+            if (dismissedAlertId === latestPermit.id) return null;
+
+            return (
+              <div className="relative animate-fade-in">
+                <div className="bg-amber-50/95 border-2 border-amber-400 rounded-2xl p-5 shadow-md text-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4 relative">
+                  {/* Top Right (X) Dismiss Button */}
+                  <button
+                    type="button"
+                    onClick={() => setDismissedAlertId(latestPermit.id)}
+                    className="absolute top-3 right-3 p-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 hover:text-amber-950 rounded-full transition shadow-sm cursor-pointer"
+                    title={isArabic ? 'إغلاق التنبيه' : 'Dismiss Alert'}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-start gap-3.5 pr-6">
+                    <div className="p-2.5 bg-amber-500 text-slate-950 rounded-xl shrink-0 mt-0.5 shadow-sm">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold text-xs text-amber-900 uppercase tracking-wide">
+                          {isArabic ? `تنبيه عاجل — طلب ترخيص رقم #${latestPermit.id}` : `LATEST ALERT — PERMIT #${latestPermit.id}`}
+                        </span>
+                        <span className="bg-amber-200/90 text-amber-950 border border-amber-300 font-mono font-bold text-[10px] px-2.5 py-0.5 rounded-full">
+                          {latestPermit.status === 'Rejected' ? (isArabic ? 'مرفوض للتعديل' : 'REJECTED') : (isArabic ? 'توجيه جديد' : 'DIRECTIVE LOGGED')}
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-sm sm:text-base text-slate-900 leading-snug">
+                        {isArabic ? latestPermit.projectNameAr : latestPermit.projectNameEn}
+                      </h3>
+                      <div className="text-xs text-slate-900 font-sans mt-1 bg-white/90 p-3 rounded-xl border border-amber-200/80 leading-relaxed font-medium shadow-2xs">
+                        <span className="font-extrabold text-amber-800">{isArabic ? 'توجيه وملاحظات المفتش الأخيرة:' : 'Latest Inspector Directives:'} </span>
+                        <span>{latestPermit.inspector_notes || (isArabic ? 'تم رفض الخطة المرفقة لعدم استيفاء مسافات التدرج واللوحات التحذيرية المتقدمة.' : 'Request rejected for non-compliance with MOT guidelines.')}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onContinue()}
+                    className="shrink-0 px-5 py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 border border-amber-400 cursor-pointer"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>{isArabic ? 'تعديل الخطة وإعادة التقديم' : 'Fix & Resubmit Request'}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
           {userRole === 'inspector' && (
             <>
           <div className={`grid grid-cols-1 ${visibleStages.length >= 4 ? 'sm:grid-cols-2' : ''} ${visibleStages.length === 5 ? 'lg:grid-cols-5' : visibleStages.length === 4 ? 'lg:grid-cols-4' : 'max-w-xs mx-auto'} gap-4`}>

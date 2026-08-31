@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Upload, Layers, Eye, EyeOff, Trash2, RotateCcw, MapPin,
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Move,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Move,
   X, GripVertical, Loader2, Image as ImageIcon, Sliders, Info,
-  Compass, Sparkles, Zap, Maximize2, Type, Ruler, Tag, ShieldAlert,
+  Compass, Sparkles, Zap, Maximize2, Minimize2, Type, Ruler, Tag, ShieldAlert,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCw, Target, RefreshCw,
   Lock, Unlock, Globe, Satellite, Navigation, CheckSquare, Square, Plus,
-  FileCode, Copy, CornerDownRight, Check, Cpu, Undo2, Redo2
+  FileCode, Copy, CornerDownRight, Check, Cpu, Undo2, Redo2,
+  Edit3, Award, PenTool, DownloadCloud, FileCheck
 } from 'lucide-react';
 import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
@@ -16,11 +17,11 @@ import { parseCadClientSide } from './utils/cadClientParser';
 // 1. Standardized Neutral & In-Browser Basemap Configurations
 // ══════════════════════════════════════════════════════════════════════
 const BASEMAP_PRESETS = {
-  hybrid: {
-    id: 'hybrid',
-    nameAr: '🛰️ قمر صناعي هجين فائق الدقة (Google HD Hybrid - 15cm)',
-    nameEn: 'Ultra-HD Hybrid Satellite (Google 15cm + Streets)',
-    url: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&scale=2',
+  satellite: {
+    id: 'satellite',
+    nameAr: '🛰️ قمر صناعي نقي (Google Satellite HD)',
+    nameEn: 'Google Satellite HD',
+    url: 'https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&scale=2',
     subdomains: ['0', '1', '2', '3'],
     maxZoom: 22,
     maxNativeZoom: 20,
@@ -30,33 +31,11 @@ const BASEMAP_PRESETS = {
   esri_satellite: {
     id: 'esri_satellite',
     nameAr: '🌍 قمر صناعي عالي الوضوح (ESRI World Imagery HD - 30cm)',
-    nameEn: 'ESRI World Imagery HD (Sub-Meter Clarity)',
+    nameEn: 'ESRI World Imagery HD (30cm)',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     subdomains: [],
     maxZoom: 22,
     maxNativeZoom: 19
-  },
-  satellite: {
-    id: 'satellite',
-    nameAr: '🛰️ قمر صناعي نقي (Google Satellite HD)',
-    nameEn: 'Google Satellite Pure HD',
-    url: 'https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&scale=2',
-    subdomains: ['0', '1', '2', '3'],
-    maxZoom: 22,
-    maxNativeZoom: 20,
-    tileSize: 512,
-    zoomOffset: -1
-  },
-  street: {
-    id: 'street',
-    nameAr: '🗺️ خريطة شوارع تخطيطية (Street Map View)',
-    nameEn: 'Street Map View',
-    url: 'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&scale=2',
-    subdomains: ['0', '1', '2', '3'],
-    maxZoom: 22,
-    maxNativeZoom: 20,
-    tileSize: 512,
-    zoomOffset: -1
   }
 };
 
@@ -155,12 +134,12 @@ export const SAUDI_MOT_ELEMENTS = {
     titleEn: 'Barrier Posters & Signboards',
     color: '#EF4444',
     items: [
-      { id: 'concrete_njb_poster', labelAr: 'لوحة تفصيل حواجز خرسانية NJB مع إنارة ثلاثية', labelEn: 'Concrete NJB w/ Lights Poster', icon: '🧱', size: [115, 60] },
-      { id: 'plastic_njb_poster', labelAr: 'لوحة تفصيل حواجز بلاستيكية NJB مع إنارة ثلاثية', labelEn: 'Plastic NJB w/ Lights Poster', icon: '🔴', size: [115, 60] },
-      { id: 'road_work_ends_poster', labelAr: 'لوحة نهاية منطقة العمل (صفراء مضيئة)', labelEn: 'Road Work Ends Signboard', icon: '🚧', size: [105, 50] },
-      { id: 'solar_vms_arrow_board', labelAr: 'لوحة أسهم وامضة شمسية على مقطورة (VMS Trailer)', labelEn: 'Solar Flashing Arrow Trailer', icon: '💡', size: [80, 50] },
-      { id: 'crash_cushion_tma', labelAr: 'شاحنة امتصاص الصدمات وحماية العمال (TMA Truck)', labelEn: 'TMA Crash Cushion Truck', icon: '🚛', size: [90, 45] },
-      { id: 'mobile_light_tower', labelAr: 'برج إنارة متحرك شمسية للتحويلة (Light Tower)', labelEn: 'Solar Mobile Light Tower', icon: '🗼', size: [60, 50] }
+      { id: 'concrete_njb_poster', labelAr: 'لوحة تفصيل حواجز خرسانية NJB مع إنارة ثلاثية', labelEn: 'Concrete NJB w/ Lights Poster', icon: '🧱', size: [64, 34] },
+      { id: 'plastic_njb_poster', labelAr: 'لوحة تفصيل حواجز بلاستيكية NJB مع إنارة ثلاثية', labelEn: 'Plastic NJB w/ Lights Poster', icon: '🔴', size: [64, 34] },
+      { id: 'road_work_ends_poster', labelAr: 'لوحة نهاية منطقة العمل (صفراء مضيئة)', labelEn: 'Road Work Ends Signboard', icon: '🚧', size: [54, 28] },
+      { id: 'solar_vms_arrow_board', labelAr: 'لوحة أسهم وامضة شمسية على مقطورة (VMS Trailer)', labelEn: 'Solar Flashing Arrow Trailer', icon: '💡', size: [44, 26] },
+      { id: 'crash_cushion_tma', labelAr: 'شاحنة امتصاص الصدمات وحماية العمال (TMA Truck)', labelEn: 'TMA Crash Cushion Truck', icon: '🚛', size: [46, 24] },
+      { id: 'mobile_light_tower', labelAr: 'برج إنارة متحرك شمسية للتحويلة (Light Tower)', labelEn: 'Solar Mobile Light Tower', icon: '🗼', size: [30, 26] }
     ]
   },
   regulatory: {
@@ -168,18 +147,18 @@ export const SAUDI_MOT_ELEMENTS = {
     titleEn: 'Regulatory & Speed Signs',
     color: '#EAB308',
     items: [
-      { id: 'stop_sign', labelAr: 'لوحة قف (STOP)', labelEn: 'STOP Sign', icon: '🛑', size: [36, 36] },
-      { id: 'give_way', labelAr: 'لوحة أفسح الطريق (GIVE WAY)', labelEn: 'Yield / Give Way Sign', icon: '🔻', size: [36, 36] },
-      { id: 'slow_sign', labelAr: 'لوحة تمهل (SLOW مع ومّاض علوي)', labelEn: 'SLOW Sign with Flashing Beacon', icon: '⚠️', size: [36, 42] },
-      { id: 'speed_limit_30', labelAr: 'تحديد سرعة ٣٠ كم/س', labelEn: 'Speed Limit 30 km/h', icon: '㉚', size: [32, 32] },
-      { id: 'speed_limit_40', labelAr: 'تحديد سرعة ٤٠ كم/س', labelEn: 'Speed Limit 40 km/h', icon: '㊵', size: [32, 32] },
-      { id: 'speed_limit_50', labelAr: 'سرعة ٥٠ + مثلث تحذير إلزامي', labelEn: 'Speed Limit 50 + Warning', icon: '㊵', size: [52, 32] },
-      { id: 'speed_limit_60', labelAr: 'تحديد سرعة ٦٠ كم/س', labelEn: 'Speed Limit 60 km/h', icon: '㊷', size: [32, 32] },
-      { id: 'speed_limit_70', labelAr: 'تحديد سرعة ٧٠ كم/س', labelEn: 'Speed Limit 70 km/h', icon: '㊸', size: [32, 32] },
-      { id: 'speed_limit_80', labelAr: 'تحديد سرعة ٨٠ كم/س', labelEn: 'Speed Limit 80 km/h', icon: '㊹', size: [32, 32] },
-      { id: 'speed_limit_100', labelAr: 'تحديد سرعة ١٠٠ كم/س', labelEn: 'Speed Limit 100 km/h', icon: '💯', size: [32, 32] },
-      { id: 'no_entry', labelAr: 'ممنوع الدخول (No Entry)', labelEn: 'No Entry Sign', icon: '⛔', size: [32, 32] },
-      { id: 'no_overtaking', labelAr: 'ممنوع التجاوز (No Overtaking)', labelEn: 'No Overtaking Sign', icon: '🚫', size: [34, 34] },
+      { id: 'stop_sign', labelAr: 'لوحة قف (STOP)', labelEn: 'STOP Sign', icon: '🛑', size: [24, 24] },
+      { id: 'give_way', labelAr: 'لوحة أفسح الطريق (GIVE WAY)', labelEn: 'Yield / Give Way Sign', icon: '🔻', size: [24, 24] },
+      { id: 'slow_sign', labelAr: 'لوحة تمهل (SLOW مع ومّاض علوي)', labelEn: 'SLOW Sign with Flashing Beacon', icon: '⚠️', size: [24, 28] },
+      { id: 'speed_limit_30', labelAr: 'تحديد سرعة ٣٠ كم/س', labelEn: 'Speed Limit 30 km/h', icon: '㉚', size: [22, 22] },
+      { id: 'speed_limit_40', labelAr: 'تحديد سرعة ٤٠ كم/س', labelEn: 'Speed Limit 40 km/h', icon: '㊵', size: [22, 22] },
+      { id: 'speed_limit_50', labelAr: 'سرعة ٥٠ + مثلث تحذير إلزامي', labelEn: 'Speed Limit 50 + Warning', icon: '㊵', size: [36, 22] },
+      { id: 'speed_limit_60', labelAr: 'تحديد سرعة ٦٠ كم/س', labelEn: 'Speed Limit 60 km/h', icon: '㊷', size: [22, 22] },
+      { id: 'speed_limit_70', labelAr: 'تحديد سرعة ٧٠ كم/س', labelEn: 'Speed Limit 70 km/h', icon: '㊸', size: [22, 22] },
+      { id: 'speed_limit_80', labelAr: 'تحديد سرعة ٨٠ كم/س', labelEn: 'Speed Limit 80 km/h', icon: '㊹', size: [22, 22] },
+      { id: 'speed_limit_100', labelAr: 'تحديد سرعة ١٠٠ كم/س', labelEn: 'Speed Limit 100 km/h', icon: '💯', size: [22, 22] },
+      { id: 'no_entry', labelAr: 'ممنوع الدخول (No Entry)', labelEn: 'No Entry Sign', icon: '⛔', size: [22, 22] },
+      { id: 'no_overtaking', labelAr: 'ممنوع التجاوز (No Overtaking)', labelEn: 'No Overtaking Sign', icon: '🚫', size: [22, 22] },
     ]
   },
   warning: {
@@ -187,17 +166,17 @@ export const SAUDI_MOT_ELEMENTS = {
     titleEn: 'Warning & Guidance Signs',
     color: '#3B82F6',
     items: [
-      { id: 'road_work_ahead', labelAr: 'أعمال طريق أمامك (Road Work Ahead)', labelEn: 'Road Work Ahead Sign', icon: '🚧', size: [38, 38] },
-      { id: 'detour_ahead', labelAr: 'تحويلة أمامك (Detour Ahead)', labelEn: 'Detour Ahead Warning', icon: '⚠️', size: [38, 38] },
-      { id: 'lane_closed_right', labelAr: 'إغلاق المسار الأيمن (Right Lane Closed)', labelEn: 'Right Lane Closed', icon: '⛔', size: [38, 38] },
-      { id: 'lane_closed_left', labelAr: 'إغلاق المسار الأيسر (Left Lane Closed)', labelEn: 'Left Lane Closed', icon: '⛔', size: [38, 38] },
-      { id: 'road_narrows', labelAr: 'الطريق يضيق أمامك (Road Narrows)', labelEn: 'Road Narrows Warning', icon: '⚠️', size: [36, 36] },
-      { id: 'speed_hump', labelAr: 'مطب صناعي للتهدئة (Speed Hump)', labelEn: 'Speed Hump Ahead', icon: '〽️', size: [36, 36] },
-      { id: 'two_way_traffic', labelAr: 'حركة سير بالاتجاهين (Two-Way)', labelEn: 'Two-Way Traffic', icon: '↕️', size: [36, 36] },
-      { id: 'detour_split_arrow', labelAr: 'سهم توجيه التحويلة الإلزامي (↖️)', labelEn: 'Mandatory Detour Arrow', icon: '↖️', size: [34, 34] },
-      { id: 'mandatory_right', labelAr: 'الزم اليمين إجباري (➡️)', labelEn: 'Keep Right Sign', icon: '➡️', size: [34, 34] },
-      { id: 'mandatory_left', labelAr: 'الزم اليسار إجباري (⬅️)', labelEn: 'Keep Left Sign', icon: '⬅️', size: [34, 34] },
-      { id: 'chevron_hazard', labelAr: 'شواخص أسهم عاكسة (Chevron ««)', labelEn: 'Chevron Alignment Marker', icon: '🔶', size: [36, 22] },
+      { id: 'road_work_ahead', labelAr: 'أعمال طريق أمامك (Road Work Ahead)', labelEn: 'Road Work Ahead Sign', icon: '🚧', size: [24, 24] },
+      { id: 'detour_ahead', labelAr: 'تحويلة أمامك (Detour Ahead)', labelEn: 'Detour Ahead Warning', icon: '⚠️', size: [24, 24] },
+      { id: 'lane_closed_right', labelAr: 'إغلاق المسار الأيمن (Right Lane Closed)', labelEn: 'Right Lane Closed', icon: '⛔', size: [24, 24] },
+      { id: 'lane_closed_left', labelAr: 'إغلاق المسار الأيسر (Left Lane Closed)', labelEn: 'Left Lane Closed', icon: '⛔', size: [24, 24] },
+      { id: 'road_narrows', labelAr: 'الطريق يضيق أمامك (Road Narrows)', labelEn: 'Road Narrows Warning', icon: '⚠️', size: [24, 24] },
+      { id: 'speed_hump', labelAr: 'مطب صناعي للتهدئة (Speed Hump)', labelEn: 'Speed Hump Ahead', icon: '〽️', size: [24, 24] },
+      { id: 'two_way_traffic', labelAr: 'حركة سير بالاتجاهين (Two-Way)', labelEn: 'Two-Way Traffic', icon: '↕️', size: [24, 24] },
+      { id: 'detour_split_arrow', labelAr: 'سهم توجيه التحويلة الإلزامي (↖️)', labelEn: 'Mandatory Detour Arrow', icon: '↖️', size: [22, 22] },
+      { id: 'mandatory_right', labelAr: 'الزم اليمين إجباري (➡️)', labelEn: 'Keep Right Sign', icon: '➡️', size: [22, 22] },
+      { id: 'mandatory_left', labelAr: 'الزم اليسار إجباري (⬅️)', labelEn: 'Keep Left Sign', icon: '⬅️', size: [22, 22] },
+      { id: 'chevron_hazard', labelAr: 'شواخص أسهم عاكسة (Chevron ««)', labelEn: 'Chevron Alignment Marker', icon: '🔶', size: [24, 16] },
     ]
   },
   barriers: {
@@ -205,14 +184,14 @@ export const SAUDI_MOT_ELEMENTS = {
     titleEn: 'Safety Devices & Barricades',
     color: '#F97316',
     items: [
-      { id: 'concrete_barrier', labelAr: 'صب خرساني نيوجيرسي منفرد (NJB)', labelEn: 'Single Concrete Barrier', icon: '🧱', size: [38, 20] },
-      { id: 'water_barrier', labelAr: 'حاجز مائي بلاستيكي عازل', labelEn: 'Water-Filled Barrier', icon: '🔵', size: [38, 20] },
-      { id: 'traffic_cone', labelAr: 'مخروط مروري مع شريط عاكس', labelEn: 'Reflective Traffic Cone', icon: '🔶', size: [22, 22] },
-      { id: 'delineator_post', labelAr: 'عمود توجيه مرن عاكس (Delineator)', labelEn: 'Flexible Delineator Post', icon: '🪧', size: [16, 34] },
-      { id: 'steel_guardrail', labelAr: 'حاجز حديدي واقي (W-Beam Guardrail)', labelEn: 'Steel Guardrail', icon: '🛡️', size: [42, 16] },
-      { id: 'temp_traffic_signal', labelAr: 'إشارة ضوئية مؤقتة ذكية بالطاقة الشمسية', labelEn: 'Temporary Traffic Signal', icon: '🚦', size: [22, 40] },
-      { id: 'flagman_post', labelAr: 'موقع رجل الراية وتنظيم السير (Flagman)', labelEn: 'Flagman Safety Station', icon: '🧑‍🦺', size: [28, 36] },
-      { id: 'pedestrian_walkway_ramp', labelAr: 'ممر ومنحدر مشاة محمي (Pedestrian Ramp)', labelEn: 'Protected Pedestrian Ramp', icon: '🚶', size: [44, 24] }
+      { id: 'concrete_barrier', labelAr: 'صب خرساني نيوجيرسي منفرد (NJB)', labelEn: 'Single Concrete Barrier', icon: '🧱', size: [24, 14] },
+      { id: 'water_barrier', labelAr: 'حاجز مائي بلاستيكي عازل', labelEn: 'Water-Filled Barrier', icon: '🔵', size: [24, 14] },
+      { id: 'traffic_cone', labelAr: 'مخروط مروري مع شريط عاكس', labelEn: 'Reflective Traffic Cone', icon: '🔶', size: [18, 18] },
+      { id: 'delineator_post', labelAr: 'عمود توجيه مرن عاكس (Delineator)', labelEn: 'Flexible Delineator Post', icon: '🪧', size: [12, 24] },
+      { id: 'steel_guardrail', labelAr: 'حاجز حديدي واقي (W-Beam Guardrail)', labelEn: 'Steel Guardrail', icon: '🛡️', size: [28, 12] },
+      { id: 'temp_traffic_signal', labelAr: 'إشارة ضوئية مؤقتة ذكية بالطاقة الشمسية', labelEn: 'Temporary Traffic Signal', icon: '🚦', size: [16, 28] },
+      { id: 'flagman_post', labelAr: 'موقع رجل الراية وتنظيم السير (Flagman)', labelEn: 'Flagman Safety Station', icon: '🧑‍🦺', size: [20, 24] },
+      { id: 'pedestrian_walkway_ramp', labelAr: 'ممر ومنحدر مشاة محمي (Pedestrian Ramp)', labelEn: 'Protected Pedestrian Ramp', icon: '🚶', size: [30, 18] }
     ]
   }
 };
@@ -224,30 +203,28 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
   switch (type) {
     case 'concrete_njb_poster':
       return `
-        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 5px 12px rgba(0,0,0,0.75)); cursor:move; user-select:none;">
-          <div style="background:#dc2626; color:white; font-family:system-ui,sans-serif; font-size:9px; font-weight:900; padding:2px 6px; border-radius:3px; white-space:nowrap; border:1px solid #991b1b; letter-spacing:0.2px; margin-bottom:2px;">
-            CONCRETE NJB NO GAP W/LIGHTS 3LINE
+        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 3px 6px rgba(0,0,0,0.6)); cursor:move; user-select:none;">
+          <div style="background:#dc2626; color:white; font-family:system-ui,sans-serif; font-size:7px; font-weight:800; padding:1px 3px; border-radius:2px; white-space:nowrap; border:0.5px solid #991b1b; letter-spacing:0.1px; margin-bottom:1px;">
+            CONCRETE NJB
           </div>
-          <svg width="84" height="46" viewBox="0 0 84 48">
+          <svg width="52" height="26" viewBox="0 0 84 48">
             <polygon points="12,42 72,42 62,18 22,18" fill="#94a3b8" stroke="#475569" stroke-width="1.5" />
             <rect x="36" y="18" width="12" height="24" fill="#ef4444" stroke="#b91c1c" stroke-width="1" />
             <rect x="8" y="42" width="68" height="5" fill="#475569" rx="1.5" />
             <path d="M 26 13 Q 42 20 58 13" fill="none" stroke="#22c55e" stroke-width="2" />
             <circle cx="26" cy="11" r="4.5" fill="#facc15" stroke="#ca8a04" stroke-width="1" />
             <circle cx="58" cy="11" r="4.5" fill="#facc15" stroke="#ca8a04" stroke-width="1" />
-            <circle cx="26" cy="11" r="6.5" fill="none" stroke="#fef08a" stroke-dasharray="2,2" />
-            <circle cx="58" cy="11" r="6.5" fill="none" stroke="#fef08a" stroke-dasharray="2,2" />
           </svg>
         </div>
       `;
 
     case 'plastic_njb_poster':
       return `
-        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 5px 12px rgba(0,0,0,0.75)); cursor:move; user-select:none;">
-          <div style="background:#dc2626; color:white; font-family:system-ui,sans-serif; font-size:9px; font-weight:900; padding:2px 6px; border-radius:3px; white-space:nowrap; border:1px solid #991b1b; letter-spacing:0.2px; margin-bottom:2px;">
-            PLASTIC NJB NO GAP W/LIGHTS 3LINE
+        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 3px 6px rgba(0,0,0,0.6)); cursor:move; user-select:none;">
+          <div style="background:#dc2626; color:white; font-family:system-ui,sans-serif; font-size:7px; font-weight:800; padding:1px 3px; border-radius:2px; white-space:nowrap; border:0.5px solid #991b1b; letter-spacing:0.1px; margin-bottom:1px;">
+            PLASTIC NJB
           </div>
-          <svg width="84" height="46" viewBox="0 0 84 48">
+          <svg width="52" height="26" viewBox="0 0 84 48">
             <path d="M 8 42 L 14 18 L 32 18 L 36 42 Z" fill="#ef4444" stroke="#b91c1c" stroke-width="1.5" />
             <path d="M 32 42 L 38 18 L 56 18 L 60 42 Z" fill="#2563eb" stroke="#1d4ed8" stroke-width="1.5" />
             <path d="M 56 42 L 62 18 L 76 18 L 78 42 Z" fill="#ef4444" stroke="#b91c1c" stroke-width="1.5" />
@@ -260,30 +237,26 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
 
     case 'road_work_ends_poster':
       return `
-        <div style="${rotStyle} position:relative; filter:drop-shadow(0 5px 12px rgba(0,0,0,0.8)); cursor:move; user-select:none;">
-          <div style="background:#fef08a; border:2px solid #ca8a04; border-radius:4px; padding:3px 8px; text-align:center; color:#713f12; font-weight:900; font-size:9.5px; transform:rotate(-12deg); box-shadow:0 3px 10px rgba(0,0,0,0.5);">
-            <div>نهاية منطقة العمل</div>
-            <div style="font-size:8px; letter-spacing:0.3px; border-top:1px solid #ca8a04; margin-top:2px; padding-top:1px;">ROAD WORK ENDS</div>
-          </div>
-          <div style="position:absolute; right:-12px; top:-2px; display:flex; flex-direction:column; gap:3px;">
-            <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:#facc15; border:1px solid #eab308; box-shadow:0 0 8px #facc15;"></span>
-            <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:#facc15; border:1px solid #eab308; box-shadow:0 0 8px #facc15;"></span>
+        <div style="${rotStyle} position:relative; filter:drop-shadow(0 3px 6px rgba(0,0,0,0.6)); cursor:move; user-select:none;">
+          <div style="background:#fef08a; border:1.5px solid #ca8a04; border-radius:3px; padding:2px 5px; text-align:center; color:#713f12; font-weight:900; font-size:7.5px; box-shadow:0 2px 6px rgba(0,0,0,0.4);">
+            <div>نهاية العمل</div>
+            <div style="font-size:6.5px; border-top:0.5px solid #ca8a04; margin-top:1px;">END WORK</div>
           </div>
         </div>
       `;
 
     case 'solar_vms_arrow_board':
       return `
-        <div style="${rotStyle} background:#0f172a; border:2px solid #eab308; border-radius:6px; padding:4px 8px; text-align:center; box-shadow:0 4px 10px rgba(0,0,0,0.8); cursor:move;">
-          <div style="color:#facc15; font-size:14px; font-weight:bold; letter-spacing:2px;">▶▶▶</div>
-          <div style="color:#ffffff; font-size:8px; font-weight:bold; margin-top:1px;">لوحة تحويل وامضة</div>
+        <div style="${rotStyle} background:#0f172a; border:1.5px solid #eab308; border-radius:4px; padding:2px 5px; text-align:center; box-shadow:0 3px 6px rgba(0,0,0,0.6); cursor:move;">
+          <div style="color:#facc15; font-size:10px; font-weight:bold; letter-spacing:1px; line-height:1;">▶▶</div>
+          <div style="color:#ffffff; font-size:6.5px; font-weight:bold; margin-top:1px;">تحويلة</div>
         </div>
       `;
 
     case 'stop_sign':
       return `
-        <div style="${rotStyle} filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <svg width="34" height="34" viewBox="0 0 40 40">
+        <div style="${rotStyle} filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <svg width="24" height="24" viewBox="0 0 40 40">
             <polygon points="12,2 28,2 38,12 38,28 28,38 12,38 2,28 2,12" fill="#dc2626" stroke="#ffffff" stroke-width="2.5" />
             <text x="20" y="25" text-anchor="middle" fill="#ffffff" font-weight="900" font-size="12" font-family="system-ui, Arial, sans-serif">STOP</text>
           </svg>
@@ -292,8 +265,8 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
 
     case 'give_way':
       return `
-        <div style="${rotStyle} filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <svg width="34" height="34" viewBox="0 0 40 40">
+        <div style="${rotStyle} filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <svg width="24" height="24" viewBox="0 0 40 40">
             <polygon points="20,38 2,4 38,4" fill="#ffffff" stroke="#dc2626" stroke-width="4" />
           </svg>
         </div>
@@ -301,9 +274,8 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
 
     case 'slow_sign':
       return `
-        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <span style="width:7px; height:7px; border-radius:50%; background:#facc15; box-shadow:0 0 6px #facc15; border:1px solid white; margin-bottom:-2px; z-index:2;"></span>
-          <div style="width:28px; height:28px; border-radius:50%; background:#f59e0b; border:2px solid white; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:8.5px; box-shadow:0 2px 6px rgba(0,0,0,0.5);">
+        <div style="${rotStyle} display:flex; flex-direction:column; align-items:center; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <div style="width:22px; height:22px; border-radius:50%; background:#f59e0b; border:1.5px solid white; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:7.5px; box-shadow:0 1px 4px rgba(0,0,0,0.4);">
             SLOW
           </div>
         </div>
@@ -311,12 +283,12 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
 
     case 'speed_limit_50':
       return `
-        <div style="${rotStyle} display:flex; align-items:center; gap:2px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <svg width="22" height="22" viewBox="0 0 24 24">
+        <div style="${rotStyle} display:flex; align-items:center; gap:2px; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <svg width="16" height="16" viewBox="0 0 24 24">
             <polygon points="12,2 22,20 2,20" fill="#facc15" stroke="#dc2626" stroke-width="2" />
             <text x="12" y="17" text-anchor="middle" font-weight="bold" font-size="12" fill="#000">!</text>
           </svg>
-          <div style="width:26px; height:26px; border-radius:50%; background:#ffffff; border:2.5px solid #dc2626; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:11px;">
+          <div style="width:20px; height:20px; border-radius:50%; background:#ffffff; border:2px solid #dc2626; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:9px;">
             50
           </div>
         </div>
@@ -330,7 +302,7 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
     case 'speed_limit_100': {
       const spd = type.replace('speed_limit_', '');
       return `
-        <div style="${rotStyle} width:28px; height:28px; border-radius:50%; background:#ffffff; border:3px solid #dc2626; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:11px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
+        <div style="${rotStyle} width:22px; height:22px; border-radius:50%; background:#ffffff; border:2px solid #dc2626; display:flex; align-items:center; justify-content:center; color:#000; font-weight:900; font-size:9.5px; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
           ${spd}
         </div>
       `;
@@ -343,8 +315,8 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
       const isDetour = type === 'detour_ahead';
       const isWork = type === 'road_work_ahead';
       return `
-        <div style="${rotStyle} filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <svg width="34" height="34" viewBox="0 0 40 40">
+        <div style="${rotStyle} filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <svg width="24" height="24" viewBox="0 0 40 40">
             <polygon points="20,2 38,20 20,38 2,20" fill="#facc15" stroke="#000000" stroke-width="2" />
             <text x="20" y="24" text-anchor="middle" font-size="14">${isWork ? '🚧' : (isDetour ? '⚠️' : '↕️')}</text>
           </svg>
@@ -357,7 +329,7 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
     case 'mandatory_left': {
       const arr = type === 'mandatory_right' ? '➡️' : (type === 'mandatory_left' ? '⬅️' : '↖️');
       return `
-        <div style="${rotStyle} width:30px; height:30px; border-radius:50%; background:#2563eb; border:2px solid white; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:15px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
+        <div style="${rotStyle} width:22px; height:22px; border-radius:50%; background:#2563eb; border:1.5px solid white; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:12px; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
           ${arr}
         </div>
       `;
@@ -365,28 +337,35 @@ const renderMotItemHtml = (type, rotation = 0, isAr = true) => {
 
     case 'chevron_hazard':
       return `
-        <div style="${rotStyle} background:white; border:2px solid #dc2626; padding:1px 5px; border-radius:3px; display:flex; gap:1px; filter:drop-shadow(0 3px 8px rgba(0,0,0,0.7)); cursor:move;">
-          <span style="color:#dc2626; font-weight:900; font-size:12px; font-family:monospace;">««</span>
+        <div style="${rotStyle} background:white; border:1.5px solid #dc2626; padding:1px 3px; border-radius:2px; display:flex; gap:1px; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); cursor:move;">
+          <span style="color:#dc2626; font-weight:900; font-size:9px; font-family:monospace;">««</span>
         </div>
       `;
 
     case 'concrete_barrier':
       return `
-        <div style="${rotStyle} width:34px; height:18px; background:#94a3b8; border:1.5px solid #475569; border-radius:2px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6)); cursor:move;">
-          <span style="font-size:11px;">🧱</span>
+        <div style="${rotStyle} width:24px; height:14px; background:#94a3b8; border:1px solid #475569; border-radius:2px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5)); cursor:move;">
+          <span style="font-size:9px;">🧱</span>
+        </div>
+      `;
+
+    case 'water_barrier':
+      return `
+        <div style="${rotStyle} width:24px; height:14px; background:#2563eb; border:1px solid #1d4ed8; border-radius:2px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5)); cursor:move;">
+          <span style="font-size:9px;">🔵</span>
         </div>
       `;
 
     case 'traffic_cone':
       return `
-        <div style="${rotStyle} width:22px; height:22px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6)); cursor:move;">
-          <span style="font-size:18px;">🔶</span>
+        <div style="${rotStyle} width:18px; height:18px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 4px rgba(0,0,0,0.5)); cursor:move;">
+          <span style="font-size:14px;">🔶</span>
         </div>
       `;
 
     default:
       return `
-        <div style="${rotStyle} background:rgba(15,23,42,0.9); color:white; border:1.5px solid #38bdf8; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold; cursor:move; filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6));">
+        <div style="${rotStyle} background:rgba(15,23,42,0.9); color:white; border:1px solid #38bdf8; padding:1px 4px; border-radius:3px; font-size:9px; font-weight:bold; cursor:move; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.5));">
           📍 ${type}
         </div>
       `;
@@ -521,7 +500,10 @@ const DwgMapOverlay = ({
   anchorLat = 24.4686,
   anchorLng = 39.6120,
   roadName = '',
-  preloadedDwgData = null
+  preloadedDwgData = null,
+  autoStartDirectDrawing = false,
+  onCadParsed = null,
+  onCadReset = null
 }) => {
   const isAr = language === 'ar';
 
@@ -534,7 +516,7 @@ const DwgMapOverlay = ({
   const [placedElements, setPlacedElements] = useState([]);
   const [selectedElementId, setSelectedElementId] = useState(null);
   const [fileName, setFileName] = useState(preloadedDwgData?.fileName || '');
-  const [activeBasemap, setActiveBasemap] = useState('hybrid');
+  const [activeBasemap, setActiveBasemap] = useState('satellite');
   const [isLocked, setIsLocked] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [selectedFeatureInfo, setSelectedFeatureInfo] = useState(null);
@@ -543,14 +525,14 @@ const DwgMapOverlay = ({
   const [additionalFiles, setAdditionalFiles] = useState([]);
   const [showFileManager, setShowFileManager] = useState(false);
 
-  // Group Visibility state (all 6 MOT groups active by default)
+  // Group Visibility state (Planning limits, Centerlines, and Dimensions toggled OFF by default)
   const [keymapVisibility, setKeymapVisibility] = useState({
     DETOUR_TAPER: true,
     SAFETY_BUFFER: true,
-    ROAD_BOUNDARY: true,
-    CENTERLINE_AXIS: true,
+    ROAD_BOUNDARY: false,
+    CENTERLINE_AXIS: false,
     PEDESTRIAN_ROUTE: true,
-    ANNOTATION_GUIDES: true
+    ANNOTATION_GUIDES: false
   });
 
   // Precision Alignment & Orientation State
@@ -562,9 +544,25 @@ const DwgMapOverlay = ({
   const [activePaletteCategory, setActivePaletteCategory] = useState('posters');
   const [stepMeters, setStepMeters] = useState(1.0); // 0.1, 1.0, 5.0
   const [showWorkZoneCorridor, setShowWorkZoneCorridor] = useState(true);
-  const [showControlNodes, setShowControlNodes] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
+  const [showControlNodes, setShowControlNodes] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
   const [selectedEditFeatureIdx, setSelectedEditFeatureIdx] = useState(null);
+  const [showKeymapSidebar, setShowKeymapSidebar] = useState(true);
+
+  // ── Multi-Layer Interactive Site Drawing State ──
+  const [isMultiLayerDrawingMode, setIsMultiLayerDrawingMode] = useState(false);
+  const [activeDrawingLayer, setActiveDrawingLayer] = useState('site'); // 'site' (Yellow 🟡) | 'transition' (Red 🔴) | 'barrier' (Cyan 🧱) | 'pedestrian' (Green 🟢)
+  const [drawnSiteNodes, setDrawnSiteNodes] = useState([]); // Yellow Polygon (Work Zone Site)
+  const [drawnTransitionNodes, setDrawnTransitionNodes] = useState([]); // Red Polyline (Detour Transition Taper)
+  const [drawnBarrierNodes, setDrawnBarrierNodes] = useState([]); // Cyan Polyline (Continuous NJB Barrier Wall / Repeating Signs)
+  const [selectedBarrierType, setSelectedBarrierType] = useState('concrete_njb'); // 'concrete_njb' | 'plastic_njb' | 'cones_series' | 'warning_lights_chain'
+  const [drawnPedestrianNodes, setDrawnPedestrianNodes] = useState([]); // Green Polyline (Safe Pedestrian Route - Optional)
+  const drawingLayerRef = useRef(null);
+
+  // ── CAD Versioning & Watermarking State ──
+  const [activeVersionType, setActiveVersionType] = useState('edited'); // 'original' | 'edited'
+  const [originalDwgData, setOriginalDwgData] = useState(null);
+  const [isWatermarking, setIsWatermarking] = useState(false);
 
   // ── History Stack for Revert & Forward (Undo / Redo) CAD Line Changes ──
   const [historyStack, setHistoryStack] = useState([]);
@@ -585,7 +583,53 @@ const DwgMapOverlay = ({
   const additionalFileInputRef = useRef(null);
   const workerRef = useRef(null);
 
-  const isMapActive = uploadStatus === 'done' || dwgData !== null;
+  const [isDirectDrawingActive, setIsDirectDrawingActive] = useState(false);
+  const isMapActive = uploadStatus === 'done' || dwgData !== null || isDirectDrawingActive;
+
+  // Direct Interactive Drawing Handler (Start with 0 Uploads)
+  const handleStartDirectDrawing = useCallback(() => {
+    setIsDirectDrawingActive(true);
+    const initialGeojson = {
+      type: 'FeatureCollection',
+      features: []
+    };
+    const initialDwg = {
+      fileName: 'Direct_Site_Plan.dxf',
+      geojson: initialGeojson,
+      centerLatLng: [anchorLat || 24.4686, anchorLng || 39.6120],
+      totalFeatures: 0,
+      detectedMotSigns: []
+    };
+    setDwgData(initialDwg);
+    setUploadStatus('done');
+    setIsMultiLayerDrawingMode(true);
+    setActiveDrawingLayer('site');
+    setDrawnSiteNodes([]);
+    setDrawnTransitionNodes([]);
+    setDrawnBarrierNodes([]);
+    setDrawnPedestrianNodes([]);
+    if (onCadParsed) {
+      onCadParsed({ siteName: 'Direct Drawing Mode' }, initialDwg, 'Direct_Site_Plan.dxf');
+    }
+  }, [anchorLat, anchorLng, onCadParsed]);
+
+  // Automatically open map in direct drawing mode if triggered from Stage 1 setup choice
+  useEffect(() => {
+    if (autoStartDirectDrawing && !isMapActive) {
+      handleStartDirectDrawing();
+    }
+  }, [autoStartDirectDrawing, isMapActive, handleStartDirectDrawing]);
+
+  // Auto-resize Leaflet map smoothly when Keymap Sidebar is collapsed or expanded
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.invalidateSize();
+      const t1 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 60);
+      const t2 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 200);
+      const t3 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 350);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+  }, [showKeymapSidebar]);
 
   // Initialize history stack when DWG data arrives
   useEffect(() => {
@@ -626,27 +670,368 @@ const DwgMapOverlay = ({
     }
   }, [historyIndex, historyStack]);
 
-  // Global Keyboard Shortcuts (Ctrl+Z / Ctrl+Y / Cmd+Shift+Z)
+  // ── Multi-Layer Interactive Map Click Listener ──
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        if (e.shiftKey) {
-          e.preventDefault();
-          handleRedo();
-        } else {
-          e.preventDefault();
-          handleUndo();
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        e.preventDefault();
-        handleRedo();
+    if (!mapInstanceRef.current || !window.L) return;
+    const map = mapInstanceRef.current;
+
+    const handleCanvasClick = (e) => {
+      if (!isMultiLayerDrawingMode) return;
+      const { lat, lng } = e.latlng;
+      const utmX = Math.round(582500 + (lng - anchorLng) * 100000);
+      const utmN = Math.round(2703800 + (lat - anchorLat) * 110000);
+
+      if (activeDrawingLayer === 'site') {
+        setDrawnSiteNodes(prev => {
+          const nextIdx = prev.length + 1;
+          return [...prev, { id: `S${nextIdx}`, lat, lng, x: utmX, y: utmN }];
+        });
+      } else if (activeDrawingLayer === 'transition') {
+        setDrawnTransitionNodes(prev => {
+          const nextIdx = prev.length + 1;
+          return [...prev, { id: `T${nextIdx}`, lat, lng, x: utmX, y: utmN }];
+        });
+      } else if (activeDrawingLayer === 'barrier') {
+        setDrawnBarrierNodes(prev => {
+          const nextIdx = prev.length + 1;
+          return [...prev, { id: `B${nextIdx}`, lat, lng, x: utmX, y: utmN }];
+        });
+      } else if (activeDrawingLayer === 'pedestrian') {
+        setDrawnPedestrianNodes(prev => {
+          const nextIdx = prev.length + 1;
+          return [...prev, { id: `P${nextIdx}`, lat, lng, x: utmX, y: utmN }];
+        });
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
 
-  // Sync preloaded DWG data when passed
+    map.on('click', handleCanvasClick);
+    return () => {
+      map.off('click', handleCanvasClick);
+    };
+  }, [isMultiLayerDrawingMode, activeDrawingLayer, anchorLat, anchorLng]);
+
+  // ── Render Multi-Layer Drawing (Yellow Site, Red Detour, Cyan Barrier, Green Pedestrian) ──
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.L) return;
+
+    if (drawingLayerRef.current) {
+      mapInstanceRef.current.removeLayer(drawingLayerRef.current);
+      drawingLayerRef.current = null;
+    }
+
+    const hasAnyDrawn = drawnSiteNodes.length > 0 || drawnTransitionNodes.length > 0 || drawnBarrierNodes.length > 0 || drawnPedestrianNodes.length > 0;
+    if (!isMultiLayerDrawingMode && !hasAnyDrawn) return;
+
+    const lg = window.L.layerGroup().addTo(mapInstanceRef.current);
+    drawingLayerRef.current = lg;
+
+    // Helper: Render Layer Nodes with Delete/Revert tooltips & drag handles
+    const renderNodeMarkers = (nodes, setNodes, color, border, labelPrefix) => {
+      nodes.forEach((node, idx) => {
+        const marker = window.L.marker([node.lat, node.lng], {
+          draggable: true,
+          pane: 'cadMarkerPane',
+          icon: window.L.divIcon({
+            className: 'multi-layer-drawn-node-marker',
+            html: `<div style="
+              background: ${color};
+              color: white;
+              border: 2px solid ${border};
+              border-radius: 50%;
+              width: 26px;
+              height: 26px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-weight: 900;
+              font-size: 10px;
+              box-shadow: 0 3px 8px rgba(0,0,0,0.6);
+              cursor: grab;
+            ">${node.id}</div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          })
+        });
+
+        marker.on('dragend', (e) => {
+          const { lat, lng } = e.target.getLatLng();
+          setNodes(prev => {
+            const u = [...prev];
+            if (u[idx]) {
+              u[idx] = {
+                ...u[idx],
+                lat,
+                lng,
+                x: Math.round(582500 + (lng - anchorLng) * 100000),
+                y: Math.round(2703800 + (lat - anchorLat) * 110000)
+              };
+            }
+            return u;
+          });
+        });
+
+        const deleteBtnHtml = `
+          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 4px; direction: ${isAr ? 'rtl' : 'ltr'}; text-align: center;">
+            <div style="font-weight:bold; color:#f8fafc; margin-bottom:4px;">${labelPrefix} ${node.id}</div>
+            <div style="color:#94a3b8; font-size:9.5px; font-family:monospace; margin-bottom:6px;">E: ${node.x}م | N: ${node.y}م</div>
+            <button id="del-node-${node.id}" style="background:#ef4444; color:white; border:none; border-radius:6px; padding:4px 8px; font-size:10.5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:3px; margin:0 auto; width:100%;">
+              🗑️ ${isAr ? 'حذف هذه النقطة' : 'Delete Node'}
+            </button>
+          </div>
+        `;
+        marker.bindPopup(deleteBtnHtml);
+        marker.on('popupopen', () => {
+          const btn = document.getElementById(`del-node-${node.id}`);
+          if (btn) {
+            btn.onclick = (e) => {
+              e.stopPropagation();
+              setNodes(prev => prev.filter((_, i) => i !== idx).map((n, i) => ({ ...n, id: `${node.id[0]}${i + 1}` })));
+              if (mapInstanceRef.current) mapInstanceRef.current.closePopup();
+            };
+          }
+        });
+
+        marker.addTo(lg);
+      });
+    };
+
+    // 1. Render Site Nodes (Yellow Polygon - ONE clean polygon)
+    renderNodeMarkers(drawnSiteNodes, setDrawnSiteNodes, '#f59e0b', '#fef08a', isAr ? 'نقطة الموقع' : 'Site Node');
+    if (drawnSiteNodes.length >= 3) {
+      window.L.polygon(drawnSiteNodes.map(n => [n.lat, n.lng]), {
+        color: '#f59e0b',
+        weight: 3,
+        fillColor: '#f59e0b',
+        fillOpacity: 0.28,
+        dashArray: '5, 5'
+      }).addTo(lg);
+    } else if (drawnSiteNodes.length === 2) {
+      window.L.polyline(drawnSiteNodes.map(n => [n.lat, n.lng]), {
+        color: '#f59e0b',
+        weight: 3,
+        dashArray: '5, 5'
+      }).addTo(lg);
+    }
+
+    // 2. Render Transition Nodes (Red Polyline)
+    renderNodeMarkers(drawnTransitionNodes, setDrawnTransitionNodes, '#ef4444', '#fecaca', isAr ? 'نقطة التحويلة' : 'Detour Node');
+    if (drawnTransitionNodes.length >= 2) {
+      window.L.polyline(drawnTransitionNodes.map(n => [n.lat, n.lng]), {
+        color: '#ef4444',
+        weight: 3.5,
+        dashArray: '6, 4'
+      }).addTo(lg);
+    }
+
+    // 3. Render Barrier Wall Nodes (Cyan / Slate Polyline with repeating pattern)
+    renderNodeMarkers(drawnBarrierNodes, setDrawnBarrierNodes, '#06b6d4', '#cffafe', isAr ? 'نقطة جدار الحواجز' : 'Barrier Node');
+    if (drawnBarrierNodes.length >= 2) {
+      window.L.polyline(drawnBarrierNodes.map(n => [n.lat, n.lng]), {
+        color: '#06b6d4',
+        weight: 4.5,
+        dashArray: '8, 4'
+      }).addTo(lg);
+    }
+
+    // 4. Render Pedestrian Nodes (Green Polyline - Optional)
+    renderNodeMarkers(drawnPedestrianNodes, setDrawnPedestrianNodes, '#10b981', '#a7f3d0', isAr ? 'نقطة المشاة' : 'Pedestrian Node');
+    if (drawnPedestrianNodes.length >= 2) {
+      window.L.polyline(drawnPedestrianNodes.map(n => [n.lat, n.lng]), {
+        color: '#10b981',
+        weight: 2.8,
+        dashArray: '4, 4'
+      }).addTo(lg);
+    }
+  }, [isMultiLayerDrawingMode, drawnSiteNodes, drawnTransitionNodes, drawnBarrierNodes, drawnPedestrianNodes, anchorLat, anchorLng, isAr]);
+
+  // Undo / Revert Last Placed Point on Active Drawing Layer
+  const handleUndoLastPoint = () => {
+    if (activeDrawingLayer === 'site') {
+      setDrawnSiteNodes(prev => prev.slice(0, -1));
+    } else if (activeDrawingLayer === 'transition') {
+      setDrawnTransitionNodes(prev => prev.slice(0, -1));
+    } else if (activeDrawingLayer === 'barrier') {
+      setDrawnBarrierNodes(prev => prev.slice(0, -1));
+    } else if (activeDrawingLayer === 'pedestrian') {
+      setDrawnPedestrianNodes(prev => prev.slice(0, -1));
+    }
+  };
+
+  // Clear All Points on Active Drawing Layer
+  const handleClearActiveLayerPoints = () => {
+    if (activeDrawingLayer === 'site') setDrawnSiteNodes([]);
+    else if (activeDrawingLayer === 'transition') setDrawnTransitionNodes([]);
+    else if (activeDrawingLayer === 'barrier') setDrawnBarrierNodes([]);
+    else if (activeDrawingLayer === 'pedestrian') setDrawnPedestrianNodes([]);
+  };
+
+  // Convert Drawn Multi-Layer Geometry into Active CAD GeoJSON Features
+  const handleCommitMultiLayerFeatures = () => {
+    if (drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2 && drawnBarrierNodes.length < 2) {
+      alert(isAr ? 'يرجى رسم حدود الموقع (٣ نقاط على الأقل) أو مسار التحويلة أو جدار الحواجز' : 'Please draw site boundary, detour transition, or barrier wall');
+      return;
+    }
+
+    const newFeatures = [];
+
+    // 1. Site Boundary (Yellow Polygon - exactly ONE clean polygon)
+    if (drawnSiteNodes.length >= 3) {
+      const siteCoords = [...drawnSiteNodes.map(n => [n.lng, n.lat]), [drawnSiteNodes[0].lng, drawnSiteNodes[0].lat]];
+      newFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [siteCoords] },
+        properties: { layer: 'WORK_ZONE_BOUNDARY', motGroup: 'WORK_ZONE_BOUNDARY', color: '#F59E0B', lengthMeters: 120 }
+      });
+    }
+
+    // 2. Detour Transition Line (Red Polyline)
+    if (drawnTransitionNodes.length >= 2) {
+      const transCoords = drawnTransitionNodes.map(n => [n.lng, n.lat]);
+      newFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: transCoords },
+        properties: { layer: 'DETOUR_TAPER', motGroup: 'DETOUR_TAPER', color: '#EF4444', lengthMeters: 140 }
+      });
+    }
+
+    // 3. Continuous Barrier Wall Line (Cyan Polyline)
+    if (drawnBarrierNodes.length >= 2) {
+      const barrierCoords = drawnBarrierNodes.map(n => [n.lng, n.lat]);
+      newFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: barrierCoords },
+        properties: {
+          layer: 'NJB_BARRIER_LINE',
+          motGroup: 'SAFETY_BUFFER',
+          color: '#06B6D4',
+          barrierType: selectedBarrierType,
+          lengthMeters: 120
+        }
+      });
+    }
+
+    // 4. Pedestrian Route (Green Polyline - Optional)
+    if (drawnPedestrianNodes.length >= 2) {
+      const pedCoords = drawnPedestrianNodes.map(n => [n.lng, n.lat]);
+      newFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: pedCoords },
+        properties: { layer: 'PEDESTRIAN_ROUTE', motGroup: 'PEDESTRIAN_ROUTE', color: '#10B981', lengthMeters: 80 }
+      });
+    }
+
+    const updatedGeojson = {
+      type: 'FeatureCollection',
+      features: [...(dwgData?.geojson?.features || []), ...newFeatures]
+    };
+
+    const firstNode = drawnSiteNodes[0] || drawnTransitionNodes[0] || drawnBarrierNodes[0] || { lat: anchorLat, lng: anchorLng };
+    const newDwgData = {
+      ...(dwgData || {}),
+      geojson: updatedGeojson,
+      centerLatLng: [firstNode.lat, firstNode.lng],
+      fileName: dwgData?.fileName || 'Custom_Detour_Site.dxf'
+    };
+
+    setDwgData(newDwgData);
+    setIsMultiLayerDrawingMode(false);
+    if (onCadParsed) onCadParsed(newDwgData);
+  };
+
+  // Export AutoCAD DXF File (Opens centered on project with 100% CAD compatibility)
+  const handleExportCadDxf = async () => {
+    try {
+      const res = await fetch('/api/cad/export-6node-dxf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodes: drawnSiteNodes,
+          detourNodes: drawnTransitionNodes,
+          pedestrianNodes: drawnPedestrianNodes,
+          barrierNodes: drawnBarrierNodes,
+          barrierType: selectedBarrierType,
+          placedElements,
+          projectName: roadName || 'Amanah Detour Site',
+          lat: anchorLat,
+          lng: anchorLng,
+          editorUser: 'Amanah Certified Safety Engineer'
+        })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Amanah_Detour_Site_${Date.now()}.dxf`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error('Error exporting CAD DXF:', e);
+    }
+  };
+
+  // Export Watermarked CAD with Official Digital Signature
+  const handleExportWatermarkedCad = async () => {
+    if (!dwgData?.geojson) {
+      alert(isAr ? 'لا توجد بيانات كاد متاحة للتصدير' : 'No CAD data available for export');
+      return;
+    }
+    setIsWatermarking(true);
+    try {
+      const res = await fetch('/api/cad/export-watermarked', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          geojson: dwgData.geojson,
+          placedElements,
+          projectName: roadName || 'Amanah Madinah Detour',
+          lat: anchorLat,
+          lng: anchorLng,
+          editorUser: 'Authorized Safety Engineer'
+        })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Watermarked_Platform_CAD_${Date.now()}.dxf`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+
+        await fetch('/api/cad/save-version', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            versionType: 'edited',
+            fileName: dwgData.fileName || 'Detour_Blueprint.dxf',
+            geojson: dwgData.geojson,
+            placedElements,
+            editorNotes: 'Exported with official platform digital signature and watermark'
+          })
+        });
+        alert(isAr ? 'تم تصدير وحفظ ملف الكاد الموثق رسمياً بنجاح!' : 'Certified AutoCAD blueprint exported and saved successfully!');
+      }
+    } catch (e) {
+      console.error('Error exporting watermarked CAD:', e);
+    } finally {
+      setIsWatermarking(false);
+    }
+  };
+
+  // Toggle between Original uploaded CAD and Platform Edited Version
+  const handleToggleVersion = (type) => {
+    setActiveVersionType(type);
+    if (type === 'original' && originalDwgData) {
+      setDwgData(JSON.parse(JSON.stringify(originalDwgData)));
+    } else if (type === 'edited' && historyStack.length > 0) {
+      const latest = historyStack[historyStack.length - 1];
+      setDwgData(prev => prev ? ({ ...prev, geojson: JSON.parse(JSON.stringify(latest)) }) : null);
+    }
+  };
+
+  // Sync preloaded DWG data when passed or reset
   useEffect(() => {
     if (preloadedDwgData) {
       setDwgData(preloadedDwgData);
@@ -675,6 +1060,19 @@ const DwgMapOverlay = ({
           mapInstanceRef.current.setView(preloadedDwgData.centerLatLng, 18, { animate: true });
         }
       }
+    } else {
+      setDwgData(null);
+      setPlacedElements([]);
+      setAdditionalFiles([]);
+      setUploadStatus('idle');
+      setFileName('');
+      setAlignOffsetX(0);
+      setAlignOffsetY(0);
+      setCadRotationDeg(0);
+      setSelectedFeatureInfo(null);
+      setSelectedElementId(null);
+      setShowControlNodes(false);
+      setSelectedEditFeatureIdx(null);
     }
   }, [preloadedDwgData, anchorLat]);
 
@@ -770,15 +1168,6 @@ const DwgMapOverlay = ({
     return counts;
   }, [dwgData]);
 
-  // Master Toggle for All Annotations
-  const allAnnotationsActive = keymapVisibility.ANNOTATION_GUIDES;
-  const toggleAllAnnotations = () => {
-    setKeymapVisibility(prev => ({
-      ...prev,
-      ANNOTATION_GUIDES: !prev.ANNOTATION_GUIDES
-    }));
-  };
-
   // Toggle single functional group
   const toggleGroupVisibility = (groupId) => {
     setKeymapVisibility(prev => ({
@@ -817,7 +1206,7 @@ const DwgMapOverlay = ({
       map.createPane('trafficSignsPane');
       map.getPane('trafficSignsPane').style.zIndex = '700';
 
-      const preset = BASEMAP_PRESETS[activeBasemap] || BASEMAP_PRESETS.hybrid;
+      const preset = BASEMAP_PRESETS[activeBasemap] || BASEMAP_PRESETS.satellite;
       const tileOpts = {
         maxZoom: preset.maxZoom,
         maxNativeZoom: preset.maxNativeZoom,
@@ -853,7 +1242,7 @@ const DwgMapOverlay = ({
     if (baseTileLayerRef.current) {
       mapInstanceRef.current.removeLayer(baseTileLayerRef.current);
     }
-    const preset = BASEMAP_PRESETS[key] || BASEMAP_PRESETS.hybrid;
+    const preset = BASEMAP_PRESETS[key] || BASEMAP_PRESETS.satellite;
     const tileOpts = {
       maxZoom: preset.maxZoom,
       maxNativeZoom: preset.maxNativeZoom,
@@ -943,6 +1332,16 @@ const DwgMapOverlay = ({
           (props.isShortLine && props.isBlockChild)
         ) {
           return false;
+        }
+
+        if (props.text) {
+          if (!showLabels) return false;
+          const functionalType = getFeatureFunctionalType(f);
+          if (functionalType === 'SAFETY_BUFFER' && keymapVisibility.SAFETY_BUFFER === false) return false;
+          if (functionalType === 'DETOUR_TAPER' && keymapVisibility.DETOUR_TAPER === false) return false;
+          if (functionalType === 'ROAD_BOUNDARY' && keymapVisibility.ROAD_BOUNDARY === false) return false;
+          if (functionalType === 'PEDESTRIAN_ROUTE' && keymapVisibility.PEDESTRIAN_ROUTE === false) return false;
+          return true;
         }
 
         const functionalType = getFeatureFunctionalType(f);
@@ -1052,26 +1451,27 @@ const DwgMapOverlay = ({
                 html: `<div style="
                   color: #38bdf8;
                   font-family: 'Consolas', monospace, sans-serif;
-                  font-size: 11.5px;
+                  font-size: 9.5px;
                   font-weight: 900;
                   white-space: nowrap;
+                  line-height: 1.2;
                   transform: rotate(${-rot}deg);
                   transform-origin: center;
-                  text-shadow: 0 0 5px #000;
-                  padding: 3px 7px;
-                  border-radius: 6px;
-                  background: rgba(15, 23, 42, 0.90);
-                  border: 1.5px solid #0284c7;
-                  box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+                  text-shadow: 0 0 4px #000;
+                  padding: 2px 5px;
+                  border-radius: 4px;
+                  background: rgba(15, 23, 42, 0.92);
+                  border: 1px solid #0284c7;
+                  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
                   display: inline-flex;
                   align-items: center;
-                  gap: 4px;
+                  gap: 3px;
                 ">
                   <span>📍</span>
                   <span>${rawText}</span>
                 </div>`,
-                iconSize: [130, 24],
-                iconAnchor: [65, 12]
+                iconSize: [110, 20],
+                iconAnchor: [55, 10]
               })
             });
           }
@@ -1084,20 +1484,21 @@ const DwgMapOverlay = ({
                 html: `<div style="
                   color: #ffffff;
                   font-family: system-ui, sans-serif;
-                  font-size: 12px;
+                  font-size: 9.5px;
                   font-weight: 900;
+                  line-height: 1.2;
                   transform: rotate(${-rot}deg);
                   transform-origin: center;
-                  padding: 2px 7px;
-                  border-radius: 4px;
+                  padding: 1.5px 5px;
+                  border-radius: 3px;
                   background: #0f172a;
-                  border: 2px solid #ffffff;
-                  box-shadow: 0 3px 8px rgba(0,0,0,0.8);
+                  border: 1.5px solid #ffffff;
+                  box-shadow: 0 2px 5px rgba(0,0,0,0.6);
                 ">
                   [ ${rawText} ]
                 </div>`,
-                iconSize: [36, 22],
-                iconAnchor: [18, 11]
+                iconSize: [28, 18],
+                iconAnchor: [14, 9]
               })
             });
           }
@@ -1110,26 +1511,27 @@ const DwgMapOverlay = ({
                 html: `<div style="
                   color: #fbbf24;
                   font-family: system-ui, sans-serif;
-                  font-size: 11.5px;
+                  font-size: 9px;
                   font-weight: 800;
                   white-space: nowrap;
+                  line-height: 1.2;
                   transform: rotate(${-rot}deg);
                   transform-origin: center;
-                  text-shadow: 0 0 4px #000;
-                  padding: 2px 6px;
-                  border-radius: 5px;
-                  background: rgba(15, 23, 42, 0.88);
-                  border: 1.5px solid #f59e0b;
-                  box-shadow: 0 3px 8px rgba(0,0,0,0.6);
+                  text-shadow: 0 0 3px #000;
+                  padding: 1.5px 5px;
+                  border-radius: 3px;
+                  background: rgba(15, 23, 42, 0.90);
+                  border: 1px solid #f59e0b;
+                  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
                   display: inline-flex;
                   align-items: center;
-                  gap: 4px;
+                  gap: 3px;
                 ">
-                  <span style="font-size:10px;">📐</span>
+                  <span style="font-size:8px;">📐</span>
                   <span>${rawText}</span>
                 </div>`,
-                iconSize: [140, 24],
-                iconAnchor: [70, 12]
+                iconSize: [100, 18],
+                iconAnchor: [50, 9]
               })
             });
           }
@@ -1141,36 +1543,36 @@ const DwgMapOverlay = ({
               html: `<div style="
                 color: ${groupDef.color};
                 font-family: 'Consolas', monospace, sans-serif;
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: 800;
                 white-space: nowrap;
+                line-height: 1.2;
                 transform: rotate(${-rot}deg);
                 transform-origin: center;
-                text-shadow: 0 0 4px #000;
-                padding: 2px 6px;
-                border-radius: 4px;
-                background: rgba(15, 23, 42, 0.85);
+                text-shadow: 0 0 3px #000;
+                padding: 1.5px 5px;
+                border-radius: 3px;
+                background: rgba(15, 23, 42, 0.88);
                 border: 1px solid ${groupDef.color}80;
                 display: inline-flex;
                 align-items: center;
-                gap: 4px;
+                gap: 3px;
               ">
-                <span style="font-size: 9px;">${groupDef.icon}</span>
+                <span style="font-size: 8px;">${groupDef.icon}</span>
                 <span>${rawText}</span>
               </div>`,
-              iconSize: [140, 22],
-              iconAnchor: [70, 11]
+              iconSize: [110, 18],
+              iconAnchor: [55, 9]
             })
           });
         }
 
+        // Suppress empty/meaningless point markers so they don't leave stray dots
         return window.L.circleMarker(latlng, {
           pane: 'cadVectorPane',
-          radius: 3.5,
-          color: groupDef.color,
-          weight: 1.5,
-          fillOpacity: 0.9,
-          fillColor: '#FFFFFF'
+          radius: 0,
+          opacity: 0,
+          fillOpacity: 0
         });
       },
       onEachFeature: (feature, layer) => {
@@ -1279,7 +1681,7 @@ const DwgMapOverlay = ({
         console.warn('Could not add drag handle:', e);
       }
     }
-  }, [mapReady, dwgData, keymapVisibility, alignOffsetX, alignOffsetY, cadRotationDeg, isLocked, anchorLat, anchorLng, isAr]);
+  }, [mapReady, dwgData, keymapVisibility, showLabels, alignOffsetX, alignOffsetY, cadRotationDeg, isLocked, anchorLat, anchorLng, isAr]);
 
   // ── Helper: Classify lines for 6-Node Control Point Editing (RED, YELLOW, BLUE only; NEVER WHITE) ──
   const getLineTargetCategory = useCallback((feature) => {
@@ -1454,25 +1856,25 @@ const DwgMapOverlay = ({
           icon: window.L.divIcon({
             className: 'zone-sketch-badge',
             html: `<div style="
-              background: rgba(245, 158, 11, 0.95);
+              background: rgba(245, 158, 11, 0.92);
               color: #ffffff;
               font-family: system-ui, sans-serif;
-              font-size: 11.5px;
+              font-size: 9.5px;
               font-weight: 800;
-              padding: 3px 8px;
-              border-radius: 6px;
-              border: 1.5px solid #ffffff;
-              box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+              padding: 2px 6px;
+              border-radius: 4px;
+              border: 1px solid #ffffff;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.5);
               white-space: nowrap;
               display: inline-flex;
               align-items: center;
-              gap: 4px;
+              gap: 3px;
             ">
               <span>🚧</span>
               <span>${isAr ? 'منطقة العمل (60M)' : 'Work Zone (60M)'}</span>
             </div>`,
-            iconSize: [160, 24],
-            iconAnchor: [80, 12]
+            iconSize: [115, 20],
+            iconAnchor: [58, 10]
           })
         }).addTo(layerGroup);
       }
@@ -1511,76 +1913,25 @@ const DwgMapOverlay = ({
               background: rgba(239, 68, 68, 0.92);
               color: #ffffff;
               font-family: system-ui, sans-serif;
-              font-size: 11px;
+              font-size: 9.5px;
               font-weight: 800;
-              padding: 3px 8px;
-              border-radius: 6px;
-              border: 1.5px solid #ffffff;
-              box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+              padding: 2px 6px;
+              border-radius: 4px;
+              border: 1px solid #ffffff;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.5);
               white-space: nowrap;
               display: inline-flex;
               align-items: center;
-              gap: 4px;
+              gap: 3px;
             ">
               <span>📐</span>
               <span>${isAr ? 'المنطقة الانتقالية (50M / 180M)' : 'Transition Zone (50M / 180M)'}</span>
             </div>`,
-            iconSize: [180, 24],
-            iconAnchor: [90, 12]
+            iconSize: [125, 20],
+            iconAnchor: [62, 10]
           })
         }).addTo(layerGroup);
       }
-    }
-
-    // ── 5. Concrete & Plastic NJB Annotation Callout Boxes (if showLabels is true) ──
-    if (showLabels && keymapVisibility.ANNOTATION_GUIDES !== false) {
-      const njb1Pos = transformPoint(originLat - 15 * mToLat, originLng - 40 * mToLng);
-      window.L.marker(njb1Pos, {
-        icon: window.L.divIcon({
-          className: 'njb-callout-box',
-          html: `<div style="
-            background: #dc2626;
-            color: #ffffff;
-            font-family: system-ui, monospace, sans-serif;
-            font-size: 10px;
-            font-weight: 900;
-            padding: 4px 7px;
-            border-radius: 4px;
-            border: 1.5px solid #ffffff;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
-            text-align: center;
-            line-height: 1.2;
-          ">
-            CONCRETE NJB NO GAP<br/>W/LIGHTS 3LINE
-          </div>`,
-          iconSize: [140, 36],
-          iconAnchor: [70, 18]
-        })
-      }).addTo(layerGroup);
-
-      const njb2Pos = transformPoint(originLat + 5 * mToLat, originLng + 45 * mToLng);
-      window.L.marker(njb2Pos, {
-        icon: window.L.divIcon({
-          className: 'njb-callout-box',
-          html: `<div style="
-            background: #dc2626;
-            color: #ffffff;
-            font-family: system-ui, monospace, sans-serif;
-            font-size: 10px;
-            font-weight: 900;
-            padding: 4px 7px;
-            border-radius: 4px;
-            border: 1.5px solid #ffffff;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.7);
-            text-align: center;
-            line-height: 1.2;
-          ">
-            PLASTIC NJB NO GAP<br/>W/LIGHTS 3LINE
-          </div>`,
-          iconSize: [135, 36],
-          iconAnchor: [67, 18]
-        })
-      }).addTo(layerGroup);
     }
 
     layerGroup.addTo(mapInstanceRef.current);
@@ -1661,6 +2012,9 @@ const DwgMapOverlay = ({
 
       const fnType = getFeatureFunctionalType(feature);
       if (keymapVisibility[fnType] === false) return; // ❌ HIDE nodes immediately when line is hidden in keymap!
+      if (targetCategory === 'yellow' && keymapVisibility.SAFETY_BUFFER === false) return;
+      if (targetCategory === 'red' && keymapVisibility.DETOUR_TAPER === false) return;
+      if (targetCategory === 'blue' && keymapVisibility.ROAD_BOUNDARY === false) return;
 
       const p = feature.properties || {};
       if (isSignFeature(feature) || p.isBlockChild || p.isShortLine || p.isTrafficSign || p.motType) {
@@ -2004,6 +2358,13 @@ const DwgMapOverlay = ({
       setUploadProgress(100);
       setDwgData(data);
 
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+        if (data.centerLatLng) {
+          mapInstanceRef.current.setView(data.centerLatLng, 18, { animate: true });
+        }
+      }
+
       if (data.detectedMotSigns?.length > 0) {
         setPlacedElements(data.detectedMotSigns);
       }
@@ -2021,12 +2382,16 @@ const DwgMapOverlay = ({
       }
 
       setUploadStatus('done');
+
+      if (onCadParsed) {
+        onCadParsed(data.extractedInfo, data, file.name);
+      }
     } catch (err) {
       console.error('CAD Upload Error:', err);
       setErrorMessage(err.message || 'Error processing CAD file');
       setUploadStatus('error');
     }
-  }, [anchorLat, anchorLng, parseCadInBrowser, isAr]);
+  }, [anchorLat, anchorLng, parseCadInBrowser, isAr, onCadParsed]);
 
   // ── 9. Upload Additional Overlay File Handler (In-Browser + Server) ──
   const handleAdditionalFileUpload = useCallback(async (file) => {
@@ -2096,7 +2461,11 @@ const DwgMapOverlay = ({
     setSelectedElementId(null);
     setShowControlNodes(false);
     setSelectedEditFeatureIdx(null);
-  }, []);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (onCadReset) {
+      onCadReset();
+    }
+  }, [onCadReset]);
 
   const handleAddElement = (typeId) => {
     if (!mapInstanceRef.current) return;
@@ -2113,14 +2482,9 @@ const DwgMapOverlay = ({
 
   return (
     <div className="space-y-4">
-      {/* ── Empty State / Drag & Drop Dropzone ── */}
+      {/* ── Empty State / Dual Mode: Direct Interactive Drawing OR Blueprint Upload ── */}
       {!isMapActive && (
-        <div
-          className="border-2 border-dashed border-slate-300 hover:border-brand-primary bg-slate-50 hover:bg-brand-primary/5 rounded-2xl p-8 text-center cursor-pointer transition-all shadow-xs"
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-        >
+        <div className="space-y-4">
           <input
             ref={fileInputRef}
             type="file"
@@ -2128,15 +2492,60 @@ const DwgMapOverlay = ({
             onChange={handleFileInput}
             className="hidden"
           />
-          <div className="flex justify-center gap-3 mb-3">
-            <Upload className="h-10 w-10 text-brand-primary animate-bounce" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 1. Direct Interactive Site Drawing & Multi-Layer CAD Generator */}
+            <div
+              onClick={handleStartDirectDrawing}
+              className="group bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/70 border-2 border-amber-500/40 hover:border-amber-400 rounded-2xl p-6 text-white text-center cursor-pointer transition-all shadow-lg hover:shadow-amber-500/20 hover:-translate-y-0.5 flex flex-col justify-between"
+            >
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center mx-auto text-amber-300 group-hover:scale-110 transition-transform">
+                  <PenTool className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-amber-200">
+                    {isAr ? '✏️ التخطيط والرسم المباشر على الخريطة (بدون ملف)' : '✏️ Direct Interactive Site Drawing (No CAD Needed)'}
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                    {isAr
+                      ? 'افتح الخريطة فوراً وارسم حدود الموقع (أصفر 🟡)، مسار التحويلة (أحمر 🔴)، وممر المشاة (أخضر 🟢)، مع إمكانية التراجع وحذف أي نقطة وتصدير كاد معتمد.'
+                      : 'Open satellite map instantly to draw Site Boundary (Yellow 🟡), Detour Transition (Red 🔴), and Pedestrian Route (Green 🟢) with node-level undo & certified CAD export.'}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-slate-800 flex items-center justify-center gap-2 text-xs font-bold text-amber-400 group-hover:text-amber-200">
+                <span>{isAr ? 'فتح الخريطة والبدء بالرسم المباشر ⚡' : 'Start Direct Drawing on Map ⚡'}</span>
+                <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+              </div>
+            </div>
+
+            {/* 2. Drag & Drop Existing Blueprint Upload */}
+            <div
+              className="border-2 border-dashed border-slate-300 hover:border-brand-primary bg-slate-50 hover:bg-brand-primary/5 rounded-2xl p-6 text-center cursor-pointer transition-all shadow-xs flex flex-col justify-between"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-brand-primary/10 border border-brand-primary/30 flex items-center justify-center mx-auto text-brand-primary">
+                  <Upload className="h-6 w-6 animate-bounce" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800">
+                    {isAr ? '📁 رفع واستيراد مخطط CAD (DWG / DXF)' : '📁 Upload CAD Blueprint (DWG / DXF)'}
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                    {isAr
+                      ? 'اسحب وأفلت مخطط أوتوكاد جاهز لتحليله داخل المتصفح، استخراج الحارات الإنشائية، والتحقق الجغرافي UTM 37N.'
+                      : 'Drag & drop your AutoCAD file for in-browser Proj4 coordinate parsing and layer ingestion.'}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 pt-3 border-t border-slate-200 flex items-center justify-center gap-2 text-xs font-bold text-brand-primary">
+                <span>{isAr ? 'تصفح ملفات الجهاز 📁' : 'Browse Local Files 📁'}</span>
+              </div>
+            </div>
           </div>
-          <p className="text-sm font-bold text-slate-800">
-            {isAr ? 'اسحب وأفلت مخطط CAD (DWG / DXF) هنا للتحليل المكاني' : 'Drag & Drop CAD (DWG / DXF) Blueprint here'}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">
-            {isAr ? '⚡ معالجة فورية داخل المتصفح (Web Worker + Proj4) • يدعم UTM 37N-39N و GeoTIFF COG' : '⚡ 100% In-Browser Engine (Web Worker + Proj4) • Supports Saudi UTM & GeoTIFF COGs'}
-          </p>
         </div>
       )}
 
@@ -2210,10 +2619,8 @@ const DwgMapOverlay = ({
                     onChange={(e) => handleBasemapChange(e.target.value)}
                     className="bg-transparent text-slate-200 font-bold text-xs focus:outline-none cursor-pointer"
                   >
-                    <option value="hybrid">{isAr ? '🛰️ قمر صناعي هجين فائق الدقة (Google HD Hybrid - 15cm)' : '🛰️ Ultra-HD Hybrid Satellite (15cm)'}</option>
-                    <option value="esri_satellite">{isAr ? '🌍 قمر صناعي عالي الوضوح (ESRI World Imagery HD - 30cm)' : '🌍 ESRI World Imagery HD (30cm)'}</option>
                     <option value="satellite">{isAr ? '🛰️ قمر صناعي نقي (Google Satellite HD)' : '🛰️ Google Satellite HD'}</option>
-                    <option value="street">{isAr ? '🗺️ خريطة شوارع تخطيطية (Street Map View)' : '🗺️ Street Map View'}</option>
+                    <option value="esri_satellite">{isAr ? '🌍 قمر صناعي عالي الوضوح (ESRI World Imagery HD - 30cm)' : '🌍 ESRI World Imagery HD (30cm)'}</option>
                   </select>
                 </div>
 
@@ -2243,6 +2650,74 @@ const DwgMapOverlay = ({
 
               {/* Right Group: Action Buttons */}
               <div className="flex items-center gap-2 flex-wrap">
+                {/* 📁 IMPORT / OVERLAY CAD BLUEPRINT BUTTON */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border border-slate-700 cursor-pointer"
+                  title={isAr ? 'استيراد أو استبدال ملف كاد (DWG / DXF)' : 'Import or replace CAD file (DWG / DXF)'}
+                >
+                  <Upload className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>{isAr ? 'استيراد كاد 📁' : 'Import CAD 📁'}</span>
+                </button>
+
+                {/* ✏️ MULTI-LAYER SITE DRAWING TOOL TOGGLE */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMultiLayerDrawingMode(!isMultiLayerDrawingMode);
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border ${
+                    isMultiLayerDrawingMode
+                      ? 'bg-gradient-to-r from-amber-600 via-red-600 to-emerald-600 text-white border-amber-400 ring-2 ring-amber-400/40 animate-pulse'
+                      : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border-slate-700'
+                  }`}
+                  title={isAr ? 'رسم حدود الموقع (أصفر)، مسار التحويلة (أحمر)، وممر المشاة (أخضر)' : 'Multi-layer drawing: Site (Yellow), Transition (Red), Pedestrian (Green)'}
+                >
+                  <PenTool className="h-3.5 w-3.5 text-amber-300" />
+                  <span>{isAr ? (isMultiLayerDrawingMode ? 'أداة الرسم نشطة ✏️' : 'أداة الرسم الهندسي ✏️') : (isMultiLayerDrawingMode ? 'Drawing Active ✏️' : 'CAD Drawing Tool ✏️')}</span>
+                </button>
+
+                {/* 🛡️ EXPORT WATERMARKED SIGNED CAD BUTTON */}
+                <button
+                  type="button"
+                  onClick={handleExportWatermarkedCad}
+                  disabled={isWatermarking || !dwgData?.geojson}
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95 border border-blue-500/40 cursor-pointer"
+                  title={isAr ? 'تصدير مخطط كاد أوتوكاد مع ختم وتوقيع رقمي موثق' : 'Export certified AutoCAD blueprint with watermark'}
+                >
+                  <Award className="h-3.5 w-3.5 text-brand-gold" />
+                  <span>{isAr ? (isWatermarking ? 'جاري التوثيق...' : 'تصدير كاد موثق 🛡️') : (isWatermarking ? 'Signing...' : 'Export Certified CAD 🛡️')}</span>
+                </button>
+
+                {/* CAD Version Selector Pill */}
+                {originalDwgData && (
+                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl p-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleVersion('original')}
+                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold transition ${
+                        activeVersionType === 'original'
+                          ? 'bg-slate-700 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {isAr ? 'النسخة الأصلية' : 'Original'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleVersion('edited')}
+                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold transition ${
+                        activeVersionType === 'edited'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {isAr ? 'نسخة المنصة المعدلة' : 'Edited (v1)'}
+                    </button>
+                  </div>
+                )}
+
                 {/* 🌟 HIGHLIGHT WORKING AREA & ZONES TOGGLE */}
                 <button
                   type="button"
@@ -2351,7 +2826,7 @@ const DwgMapOverlay = ({
                       mapInstanceRef.current.flyTo(dwgData.centerLatLng, 18, { animate: true });
                     }
                   }}
-                  className="flex items-center gap-1.5 bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95"
+                  className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition active:scale-95"
                   title={isAr ? 'انتقال فوري لموقع مشروع التحويلة على الخريطة' : 'Fly directly to construction site'}
                 >
                   <MapPin className="h-3.5 w-3.5 text-amber-300" />
@@ -2554,20 +3029,213 @@ const DwgMapOverlay = ({
               2. SPLIT-VIEW: MAP VIEWPORT (LEFT) + DOCKED KEYMAP & LAYERS (RIGHT)
           ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
-            {/* ── MAP VIEWPORT (8 of 12 cols on desktop) ── */}
-            <div className="lg:col-span-8 relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-950" style={{ minHeight: '640px' }}>
+            {/* ── MAP VIEWPORT (8 of 12 cols when sidebar open, 12 of 12 when collapsed) ── */}
+            <div className={`${showKeymapSidebar ? 'lg:col-span-8' : 'lg:col-span-12'} relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-950 transition-all duration-300`} style={{ minHeight: '640px' }}>
               <div ref={mapContainerRef} className="absolute inset-0 z-0" />
 
+              {/* Floating Multi-Layer Guided Drawing Mode Assistant Banner */}
+              {isMultiLayerDrawingMode && (
+                <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-950/95 backdrop-blur-md text-white border border-amber-500/80 rounded-2xl p-3.5 shadow-2xl space-y-2.5 animate-in fade-in zoom-in duration-150 text-xs max-w-xl w-[92%] sm:w-full">
+                  {/* Header & Step Selector Tabs */}
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                      <PenTool className="w-4 h-4 text-brand-gold animate-pulse" />
+                      <span>{isAr ? 'أداة التخطيط والرسم المتعدد:' : 'Multi-Layer CAD Drawing Mode:'}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                      {/* Step 1: Site Layer (Yellow 🟡) */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveDrawingLayer('site')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          activeDrawingLayer === 'site'
+                            ? 'bg-amber-500 text-slate-950 shadow-sm ring-2 ring-amber-400/50'
+                            : 'text-amber-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                        <span>{isAr ? `١. الموقع (${drawnSiteNodes.length}) 🟡` : `1. Site (${drawnSiteNodes.length}) 🟡`}</span>
+                      </button>
+
+                      {/* Step 2: Transition / Detour Layer (Red 🔴) */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveDrawingLayer('transition')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          activeDrawingLayer === 'transition'
+                            ? 'bg-red-500 text-white shadow-sm ring-2 ring-red-400/50'
+                            : 'text-red-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                        <span>{isAr ? `٢. التحويلة (${drawnTransitionNodes.length}) 🔴` : `2. Detour (${drawnTransitionNodes.length}) 🔴`}</span>
+                      </button>
+
+                      {/* Step 3: Continuous Barrier Wall / NJB / Repeating Sign Range Layer (Cyan 🧱) */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveDrawingLayer('barrier')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          activeDrawingLayer === 'barrier'
+                            ? 'bg-cyan-500 text-slate-950 shadow-sm ring-2 ring-cyan-400/50'
+                            : 'text-cyan-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                        <span>{isAr ? `٣. جدار الحواجز (${drawnBarrierNodes.length}) 🧱` : `3. Barrier Wall (${drawnBarrierNodes.length}) 🧱`}</span>
+                      </button>
+
+                      {/* Step 4: Pedestrian Route Layer (Green 🟢 - Optional) */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveDrawingLayer('pedestrian')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          activeDrawingLayer === 'pedestrian'
+                            ? 'bg-emerald-500 text-slate-950 shadow-sm ring-2 ring-emerald-400/50'
+                            : 'text-emerald-400 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span>{isAr ? `٤. المشاة (${drawnPedestrianNodes.length}) 🟢` : `4. Ped (${drawnPedestrianNodes.length}) 🟢`}</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMultiLayerDrawingMode(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                      title={isAr ? 'إغلاق وضع الرسم' : 'Exit drawing mode'}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Active Layer Guidance & Sub-Selectors */}
+                  <div className="flex items-center justify-between gap-3 text-xs flex-wrap">
+                    <div className="text-slate-300">
+                      {activeDrawingLayer === 'site' && (
+                        <span>
+                          {isAr
+                            ? `🟡 انقر على الخريطة لتحديد حدود منطقة العمل (تم وضع ${drawnSiteNodes.length} نقاط - يتطلب ٣ على الأقل)`
+                            : `🟡 Click on map to draw Site Boundary polygon (${drawnSiteNodes.length} pts placed)`}
+                        </span>
+                      )}
+                      {activeDrawingLayer === 'transition' && (
+                        <span>
+                          {isAr
+                            ? `🔴 انقر لتحديد مسار وتدرج التحويلة (تم وضع ${drawnTransitionNodes.length} نقاط)`
+                            : `🔴 Click on map to draw Detour Transition line (${drawnTransitionNodes.length} pts placed)`}
+                        </span>
+                      )}
+                      {activeDrawingLayer === 'barrier' && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-cyan-300 font-bold">
+                            {isAr ? '🧱 نوع الجدار / السلسلة المتكررة:' : 'Barrier / Signage Type:'}
+                          </span>
+                          <select
+                            value={selectedBarrierType}
+                            onChange={(e) => setSelectedBarrierType(e.target.value)}
+                            className="bg-slate-900 text-cyan-300 border border-cyan-700/60 rounded px-2 py-0.5 text-xs font-bold focus:outline-none"
+                          >
+                            <option value="concrete_njb">{isAr ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier Wall (2m)'}</option>
+                            <option value="plastic_njb">{isAr ? '🚧 حواجز بلاستيكية مائية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
+                            <option value="cones_series">{isAr ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
+                            <option value="warning_lights_chain">{isAr ? '💡 شريط إضاءة تحذيري متصل' : '💡 Warning Lights Chain'}</option>
+                          </select>
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            {isAr ? `(تم وضع ${drawnBarrierNodes.length} نقاط)` : `(${drawnBarrierNodes.length} pts placed)`}
+                          </span>
+                        </div>
+                      )}
+                      {activeDrawingLayer === 'pedestrian' && (
+                        <span>
+                          {isAr
+                            ? `🟢 انقر لرسم ممر المشاة الآمن (اختياري - ${drawnPedestrianNodes.length} نقاط)`
+                            : `🟢 Click on map to draw Safe Pedestrian Route (${drawnPedestrianNodes.length} pts placed)`}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Node Management Actions (Undo Last Node, Clear Layer) */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleUndoLastPoint}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        title={isAr ? 'تراجع عن آخر نقطة تم وضعها في الطبقة الحالية' : 'Undo last placed node'}
+                      >
+                        <Undo2 className="w-3 h-3" />
+                        <span>{isAr ? 'تراجع عن نقطة' : 'Undo Point'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleClearActiveLayerPoints}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        title={isAr ? 'مسح كافة نقاط الطبقة الحالية' : 'Clear active layer points'}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isAr ? 'مسح الطبقة' : 'Clear'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Primary Commit & Export Actions Bar */}
+                  <div className="flex items-center justify-between border-t border-slate-800 pt-2 gap-2 flex-wrap">
+                    <div className="text-[11px] text-slate-400">
+                      💡 {isAr ? 'انقر على أي نقطة على الخريطة لحذفها بشكل فردي، أو اسحبها لإعادة ضبط موقعها' : 'Click any node on map to delete individually, or drag to adjust'}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCommitMultiLayerFeatures}
+                        disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'توليد وحفظ الكاد ⚡' : 'Commit CAD ⚡'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleExportCadDxf}
+                        disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        title={isAr ? 'تصدير ملف كاد أوتوكاد متوافق مع كافة الإصدارات' : 'Export certified AutoCAD DXF blueprint'}
+                      >
+                        <DownloadCloud className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'تصدير كاد أوتوكاد 💾' : 'Export CAD 💾'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Spatial Drag Handle Banner */}
-              {!isLocked && (
+              {!isLocked && !isMultiLayerDrawingMode && (
                 <div className="absolute top-3 left-3 z-10 bg-slate-950/85 text-blue-300 px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border border-blue-500/40 shadow-lg flex items-center gap-1.5">
                   <span className="animate-pulse">✥</span>
                   <span>{isAr ? 'اسحب المقبض الأزرق لتحريك المخطط، واسحب أي لوحة لتغيير موقعها' : 'Drag blue handle to align CAD, drag any sign to move'}</span>
                 </div>
               )}
 
-              {/* Saudi MOT Sign & Poster Placement Toolbar Button on Canvas */}
-              <div className="absolute top-3 right-3 z-10">
+              {/* Saudi MOT Sign & Poster Placement Toolbar Button on Canvas & Expand Keymap Toggle */}
+              <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+                {!showKeymapSidebar && (
+                  <button
+                    type="button"
+                    onClick={() => setShowKeymapSidebar(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40 hover:scale-105 active:scale-95"
+                    title={isAr ? 'إظهار لوحة دليل ومفتاح طبقات المخطط' : 'Expand Keymap & Layers Sidebar'}
+                  >
+                    <Layers className="h-3.5 w-3.5 text-brand-gold" />
+                    <span>{isAr ? 'دليل الطبقات 📂' : 'Keymap & Layers 📂'}</span>
+                    <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180 text-amber-400" />
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setShowPalette(!showPalette)}
@@ -2743,137 +3411,132 @@ const DwgMapOverlay = ({
             </div>
 
             {/* ── DOCKED KEYMAP & LAYERS PANEL (4 of 12 cols on desktop) ── */}
-            <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4">
-              <div className="space-y-3.5">
-                {/* Header & Master Toggle */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <div>
-                    <h3 className="font-bold text-sm text-brand-gold flex items-center gap-1.5">
-                      <Layers className="h-4 w-4" />
-                      <span>{isAr ? 'دليل ومفتاح طبقات المخطط' : 'Keymap & CAD Layers'}</span>
-                    </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {isAr ? 'معايير أمانة المدينة المنورة وكود الطرق ٣٠٥' : 'MOT & Saudi Road Code 305 Standards'}
-                    </p>
-                  </div>
-
-                  {/* Master Annotation Toggle */}
-                  <button
-                    type="button"
-                    onClick={toggleAllAnnotations}
-                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 ${
-                      allAnnotationsActive
-                        ? 'bg-purple-900/60 border-purple-500 text-purple-200'
-                        : 'bg-slate-900 border-slate-700 text-slate-400'
-                    }`}
-                    title={isAr ? 'إظهار / إخفاء كافة نصوص الأبعاد والإرشادات' : 'Toggle all explanatory annotations'}
-                  >
-                    <Type className="h-3 w-3" />
-                    <span>{allAnnotationsActive ? (isAr ? 'الأبعاد: ظاهرة' : 'Dims: ON') : (isAr ? 'الأبعاد: مخفية' : 'Dims: OFF')}</span>
-                  </button>
-                </div>
-
-                {/* 6 MOT Functional Color Groups */}
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-                  {Object.values(MOT_KEYMAP_GROUPS).map((group) => {
-                    const isVisible = keymapVisibility[group.id] !== false;
-                    const count = featureCounts[group.id] || 0;
-
-                    return (
-                      <div
-                        key={group.id}
-                        onClick={() => toggleGroupVisibility(group.id)}
-                        className={`p-3 rounded-xl border text-xs cursor-pointer transition-all select-none ${
-                          isVisible
-                            ? `${group.bgClass} ${group.borderClass} shadow-xs`
-                            : 'bg-slate-900/40 border-slate-800/40 opacity-40 hover:opacity-60'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {/* Color Swatch */}
-                            <span
-                              className="w-4 h-4 rounded-full shrink-0 shadow-xs border border-white/30"
-                              style={{ backgroundColor: group.color }}
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-slate-100 text-xs truncate">
-                                  {isAr ? group.titleAr : group.titleEn}
-                                </span>
-                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md bg-slate-900 text-slate-300 border border-slate-700">
-                                  {count}
-                                </span>
-                              </div>
-                              <p className="text-[10.5px] text-slate-400 mt-1 line-clamp-2">
-                                {isAr ? group.descAr : group.descEn}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Eye Switch */}
-                          <div className="shrink-0 ml-2">
-                            {isVisible ? (
-                              <Eye className="h-4 w-4 text-emerald-400" />
-                            ) : (
-                              <EyeOff className="h-4 w-4 text-slate-500" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Placed Elements Summary in Side Panel */}
-              {placedElements.length > 0 && (
-                <div className="pt-3 border-t border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-300 flex items-center gap-1">
-                      <span>🛑</span>
-                      <span>{isAr ? `اللوحات والشواخص الموضوعة (${placedElements.length})` : `Placed Elements (${placedElements.length})`}</span>
-                    </span>
+            {showKeymapSidebar && (
+              <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4 animate-fade-in">
+                <div className="space-y-3.5">
+                  {/* Header & Collapse Button */}
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div>
+                      <h3 className="font-bold text-sm text-brand-gold flex items-center gap-1.5">
+                        <Layers className="h-4 w-4" />
+                        <span>{isAr ? 'دليل ومفتاح طبقات المخطط' : 'Keymap & CAD Layers'}</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {isAr ? 'معايير أمانة المدينة المنورة وكود الطرق ٣٠٥' : 'MOT & Saudi Road Code 305 Standards'}
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setPlacedElements([]);
-                        setSelectedElementId(null);
-                      }}
-                      className="text-[10px] text-red-400 hover:text-red-300 font-bold"
+                      onClick={() => setShowKeymapSidebar(false)}
+                      className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition cursor-pointer"
+                      title={isAr ? 'إخفاء لوحة الطبقات لتوسيع الخريطة' : 'Collapse Sidebar for Full Map'}
                     >
-                      {isAr ? 'مسح الكل' : 'Clear'}
+                      <ChevronRight className="h-4 w-4 rtl:rotate-180 text-slate-300" />
                     </button>
                   </div>
-                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto custom-scrollbar">
-                    {placedElements.map((el, idx) => (
-                      <span
-                        key={el.id}
-                        onClick={() => setSelectedElementId(el.id)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition border ${
-                          selectedElementId === el.id
-                            ? 'bg-blue-900/80 border-blue-500 text-blue-200 shadow-sm'
-                            : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
-                        }`}
-                      >
-                        <span>{el.type}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPlacedElements(prev => prev.filter((_, i) => i !== idx));
-                            if (selectedElementId === el.id) setSelectedElementId(null);
-                          }}
-                          className="text-slate-500 hover:text-red-400 ml-1 font-bold"
+
+                  {/* 6 MOT Functional Color Groups */}
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
+                    {Object.values(MOT_KEYMAP_GROUPS).map((group) => {
+                      const isVisible = keymapVisibility[group.id] !== false;
+                      const count = featureCounts[group.id] || 0;
+
+                      return (
+                        <div
+                          key={group.id}
+                          onClick={() => toggleGroupVisibility(group.id)}
+                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all select-none ${
+                            isVisible
+                              ? `${group.bgClass} ${group.borderClass} shadow-xs`
+                              : 'bg-slate-900/40 border-slate-800/40 opacity-40 hover:opacity-60'
+                          }`}
                         >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {/* Color Swatch */}
+                              <span
+                                className="w-4 h-4 rounded-full shrink-0 shadow-xs border border-white/30"
+                                style={{ backgroundColor: group.color }}
+                              />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-100 text-xs truncate">
+                                    {isAr ? group.titleAr : group.titleEn}
+                                  </span>
+                                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md bg-slate-900 text-slate-300 border border-slate-700">
+                                    {count}
+                                  </span>
+                                </div>
+                                <p className="text-[10.5px] text-slate-400 mt-1 line-clamp-2">
+                                  {isAr ? group.descAr : group.descEn}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Eye Switch */}
+                            <div className="shrink-0 ml-2">
+                              {isVisible ? (
+                                <Eye className="h-4 w-4 text-emerald-400" />
+                              ) : (
+                                <EyeOff className="h-4 w-4 text-slate-500" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
-            </div>
+
+                {/* Placed Elements Summary in Side Panel */}
+                {placedElements.length > 0 && (
+                  <div className="pt-3 border-t border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300 flex items-center gap-1">
+                        <span>🛑</span>
+                        <span>{isAr ? `اللوحات والشواخص الموضوعة (${placedElements.length})` : `Placed Elements (${placedElements.length})`}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPlacedElements([]);
+                          setSelectedElementId(null);
+                        }}
+                        className="text-[10px] text-red-400 hover:text-red-300 font-bold cursor-pointer"
+                      >
+                        {isAr ? 'مسح الكل' : 'Clear'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto custom-scrollbar">
+                      {placedElements.map((el, idx) => (
+                        <span
+                          key={el.id}
+                          onClick={() => setSelectedElementId(el.id)}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition border ${
+                            selectedElementId === el.id
+                              ? 'bg-blue-900/80 border-blue-500 text-blue-200 shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                          }`}
+                        >
+                          <span>{el.type}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPlacedElements(prev => prev.filter((_, i) => i !== idx));
+                              if (selectedElementId === el.id) setSelectedElementId(null);
+                            }}
+                            className="text-slate-500 hover:text-red-400 ml-1 font-bold"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

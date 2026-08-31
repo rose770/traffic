@@ -7,11 +7,30 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Node & Build Outputs
 node_modules
 dist
 dist-ssr
 *.local
 .env
+
+# Python Caches & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+env/
+venv/
+ENV/
+
+# Database & Cache Files
+database.sqlite
+tiles_cache/
+scratch/
+scratch.json
 
 # Editor directories and files
 .vscode/*
@@ -22,6 +41,3 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sw?
-tiles_cache/
-scratch/
-database.sqlite

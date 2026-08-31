@@ -4,9 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"node server.js\"",
+    "dev": "concurrently \"vite\" \"python main.py\"",
     "build": "vite build",
-    "start": "node server.js",
+    "start": "python main.py",
+    "test": "pytest tests/ && python test_unit_tests.py && python test_cad_integration.py",
+    "test:cv": "pytest tests/test_alignment.py",
+    "test:logs": "pytest tests/test_logging_and_errors.py",
+    "logs": "python view_logs.py --follow",
+    "logs:errors": "python view_logs.py --level ERROR",
+    "logs:metrics": "python view_logs.py --metrics",
     "lint": "oxlint",
     "preview": "vite preview"
   },
