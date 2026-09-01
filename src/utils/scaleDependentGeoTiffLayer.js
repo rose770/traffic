@@ -22,7 +22,6 @@ export class ScaleDependentGeoTiffController {
     this.onStateChange = options.onStateChange || null;
 
     this.cogService = new CogTileService(this.cogUrl);
-    this.footprintPolygon = null;
     this.rasterOverlay = null;
     this.debounceTimer = null;
     this.isRendering = false;
@@ -34,7 +33,6 @@ export class ScaleDependentGeoTiffController {
 
   init() {
     if (!this.map || !window.L) return;
-    this.createFootprintPolygon();
 
     this.onMoveEnd = () => {
       clearTimeout(this.debounceTimer);
@@ -45,39 +43,6 @@ export class ScaleDependentGeoTiffController {
     this.map.on('zoomend', this.onMoveEnd);
 
     this.evaluateScaleAndRender();
-  }
-
-  createFootprintPolygon() {
-    if (!this.map || !window.L) return;
-
-    const [sw, ne] = this.surveyBounds;
-    const latLngs = [
-      [sw[0], sw[1]],
-      [ne[0], sw[1]],
-      [ne[0], ne[1]],
-      [sw[0], ne[1]]
-    ];
-
-    this.footprintPolygon = window.L.polygon(latLngs, {
-      color: '#0EA5E9',
-      weight: 2,
-      dashArray: '6, 6',
-      fillColor: '#38BDF8',
-      fillOpacity: 0.12,
-      interactive: true
-    }).addTo(this.map);
-
-    this.footprintPolygon.bindTooltip(
-      '<div class="text-xs font-sans text-slate-900 font-semibold p-1">' +
-      '🏯 <b>High-Accuracy Survey Area</b><br/>' +
-      '<span class="text-[10p] text-sky-700">Zoom to 16+ or click to activate sub-meter GeoTIFF</span>' +
-      '</div>',
-      { sticky: true, className: 'geotiff-survey-tooltip' }
-    );
-
-    this.footprintPolygon.on('click', () => {
-      this.map.fitBounds(this.surveyBounds, { maxZoom: 17, animate: true, duration: 1.0 });
-    });
   }
 
   async evaluateScaleAndRender() {
@@ -116,25 +81,7 @@ export class ScaleDependentGeoTiffController {
         this.map.removeLayer(this.rasterOverlay);
         this.rasterOverlay = null;
       }
-
-      if (this.footprintPolygon) {
-        this.footprintPolygon.setStyle({
-          opacity: 0.9,
-          fillOpacity: 0.15,
-          dashArray: '6, 6',
-          weight: 2.5
-        });
-      }
       return;
-    }
-
-    if (this.footprintPolygon) {
-      this.footprintPolygon.setStyle({
-        opacity: 0.4,
-        fillOpacity: 0.03,
-        dashArray: '2, 4',
-        weight: 1.5
-      });
     }
 
     if (!intersects) {
@@ -258,11 +205,6 @@ export class ScaleDependentGeoTiffController {
   setSurveyBounds(bounds) {
     this.surveyBounds = bounds;
     this.cache.clear();
-    if (this.footprintPolygon) {
-      this.map.removeLayer(this.footprintPolygon);
-      this.footprintPolygon = null;
-    }
-    this.createFootprintPolygon();
     this.evaluateScaleAndRender();
   }
 
@@ -270,9 +212,6 @@ export class ScaleDependentGeoTiffController {
     if (this.rasterOverlay) {
       this.map.removeLayer(this.rasterOverlay);
       this.rasterOverlay = null;
-    }
-    if (this.footprintPolygon) {
-      this.footprintPolygon.setStyle({ opacity: 0, fillOpacity: 0 });
     }
   }
 
@@ -285,9 +224,7 @@ export class ScaleDependentGeoTiffController {
       }
       if (this.rasterOverlay) {
         this.map.removeLayer(this.rasterOverlay);
-      }
-      if (this.footprintPolygon) {
-        this.map.removeLayer(this.footprintPolygon);
+        this.rasterOverlay = null;
       }
     }
     this.cache.clear();

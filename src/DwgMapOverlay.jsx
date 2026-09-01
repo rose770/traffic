@@ -564,10 +564,9 @@ const DwgMapOverlay = ({
   const dragSnapshotRef = useRef(null);
 
   // ── Scale-Dependent High-Accuracy GeoTIFF Imagery Layer State ──
-  const [geoTiffEnabled, setGeoTiffEnabled] = useState(true);
-  const [geoTiffThreshold, setGeoTiffThreshold] = useState(16);
-  const [geoTiffOpacity, setGeoTiffOpacity] = useState(0.95);
-  const [showGeoTiffConfig, setShowGeoTiffConfig] = useState(false);
+  const [geoTiffEnabled] = useState(true);
+  const geoTiffThreshold = 16; // Locked default to Zoom 16+
+  const geoTiffOpacity = 0.95;
   const [geoTiffState, setGeoTiffState] = useState({
     active: false,
     currentZoom: 18,
@@ -3216,70 +3215,7 @@ const DwgMapOverlay = ({
                       </button>
                     </div>
                   )}
-
-                  {/* Settings Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setShowGeoTiffConfig(prev => !prev)}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition cursor-pointer"
-                    title={isAr ? 'إعدادات طبقة GeoTIFF المساحية' : 'GeoTIFF Layer Settings'}
-                  >
-                    <Sliders className="h-3.5 w-3.5" />
-                  </button>
                 </div>
-
-                {/* GeoTIFF Config Popover */}
-                {showGeoTiffConfig && (
-                  <div className="bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl backdrop-blur-md text-xs text-slate-200 flex flex-col gap-2.5 w-64 animate-fade-in z-30">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-800 font-bold text-teal-400">
-                      <span>{isAr ? '⚙️ إعدادات طبقة GeoTIFF' : '⚙️ GeoTIFF Settings'}</span>
-                      <button onClick={() => setShowGeoTiffConfig(false)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span>{isAr ? 'تفعيل الطبقة التلقائية:' : 'Enable Layer:'}</span>
-                      <input
-                        type="checkbox"
-                        checked={geoTiffEnabled}
-                        onChange={e => setGeoTiffEnabled(e.target.checked)}
-                        className="rounded accent-teal-500 cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>{isAr ? 'عتبة التقريب (Zoom Trigger):' : 'Zoom Trigger:'}</span>
-                        <span className="font-bold text-sky-400">Zoom {geoTiffThreshold}+</span>
-                      </div>
-                      <select
-                        value={geoTiffThreshold}
-                        onChange={e => setGeoTiffThreshold(Number(e.target.value))}
-                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 cursor-pointer"
-                      >
-                        <option value={15}>Zoom 15+ (~1:18,000)</option>
-                        <option value={16}>Zoom 16+ (~1:9,000 Standard)</option>
-                        <option value={17}>Zoom 17+ (~1:4,500 Detailed)</option>
-                        <option value={18}>Zoom 18+ (~1:2,200 Ultra-Close)</option>
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>{isAr ? 'شفافية الصورة:' : 'Opacity:'}</span>
-                        <span className="font-bold text-teal-400">{Math.round(geoTiffOpacity * 100)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.2"
-                        max="1.0"
-                        step="0.05"
-                        value={geoTiffOpacity}
-                        onChange={e => setGeoTiffOpacity(parseFloat(e.target.value))}
-                        className="accent-teal-500 cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Spatial Drag Handle Banner */}
