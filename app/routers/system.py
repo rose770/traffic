@@ -6,8 +6,9 @@ import os
 import sys
 import time
 import psutil
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
+from pydantic import BaseModel
 from fastapi import APIRouter, Query, Response, status
 
 from app.logging_config import memory_log_handler, get_logger
@@ -148,12 +149,38 @@ def query_system_logs(
     }
 
 
-# ----------------------------------------------------------------------
-# 4. Clear Log Buffer (Ops Utility)
-# ----------------------------------------------------------------------
 @router.post("/logs/clear")
 def clear_system_logs():
     """Clears the live in-memory telemetry log buffer."""
     memory_log_handler.clear()
     logger.info("In-memory operational log buffer cleared by administrator.")
     return {"success": True, "message": "Log buffer cleared successfully."}
+
+
+# ----------------------------------------------------------------------
+# 5. Record Client & Subsystem Events (e.g. GIS / ESRI Tile Fallbacks)
+# ----------------------------------------------------------------------
+class ClientLogPayload(BaseModel):
+    level: str = "WARNING"
+    module: str = "gis.esri"
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+
+@router.post("/logs/record")
+def record_client_log(payload: ClientLogPayload):
+    """Records frontend/subsystem events into the central operational telemetry log."""
+    log_msg = f"[{payload.module}] {payload.message}"
+    if payload.details:
+        log_msg += f" | Details: {payload.details}"
+
+    lvl = payload.level.upper()
+    if lvl in ["ERROR", "CRITICAL"]:
+        logger.error(log_msg)
+    elif lvl == "WARNING":
+        logger.warning(log_msg)
+    else:
+        logger.info(log_msg)
+
+    return {"success": True, "recorded": log_msg}
+

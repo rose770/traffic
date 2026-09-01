@@ -12,7 +12,7 @@ import {
 import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
 import { parseCadClientSide } from './utils/cadClientParser';
-import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG } from './utils/esriTileService';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer } from './utils/esriTileService';
 
 // ══════════════════════════════════════════════════════════════════════
 // 1. Standardized Neutral & In-Browser Basemap Configurations (ESRI Pure Satellite)
@@ -1353,7 +1353,7 @@ const DwgMapOverlay = ({
       };
       if (preset.tileSize) { tileOpts.tileSize = preset.tileSize; }
       if (preset.zoomOffset !== undefined) { tileOpts.zoomOffset = preset.zoomOffset; }
-      baseTileLayerRef.current = window.L.tileLayer(preset.url, tileOpts).addTo(map);
+      baseTileLayerRef.current = createEsriTileLayer(tileOpts).addTo(map);
 
       mapInstanceRef.current = map;
       markersLayerRef.current = window.L.layerGroup({ pane: 'trafficSignsPane' }).addTo(map);
@@ -1389,7 +1389,7 @@ const DwgMapOverlay = ({
     };
     if (preset.tileSize) { tileOpts.tileSize = preset.tileSize; }
     if (preset.zoomOffset !== undefined) { tileOpts.zoomOffset = preset.zoomOffset; }
-    baseTileLayerRef.current = window.L.tileLayer(preset.url, tileOpts).addTo(mapInstanceRef.current);
+    baseTileLayerRef.current = createEsriTileLayer(tileOpts).addTo(mapInstanceRef.current);
   };
 
   // ── 3. Smart Auto-Alignment Trigger ──

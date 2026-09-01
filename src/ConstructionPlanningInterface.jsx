@@ -87,7 +87,7 @@ import SixDofNodeInspector from './components/SixDofNodeInspector';
 import SixDofGizmo from './components/SixDofGizmo';
 import GeoreferencedReportModal from './components/GeoreferencedReportModal';
 import { RoadAutocomplete } from './components/RoadAutocomplete';
-import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG } from './utils/esriTileService';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer } from './utils/esriTileService';
 import {
   DURATION_CATEGORIES,
   ROAD_CLASSIFICATIONS,
@@ -557,11 +557,7 @@ const ReportSatelliteMapView = ({ permit, language = 'ar' }) => {
       attributionControl: false
     });
 
-    window.L.tileLayer(getEsriSatelliteUrl(), {
-      maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
-      maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
-      attribution: ESRI_SATELLITE_CONFIG.attribution
-    }).addTo(map);
+    createEsriTileLayer().addTo(map);
 
     const latlngs = [];
     parsedPoints.forEach((p, index) => {
@@ -2176,11 +2172,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         attributionControl: false
       });
 
-      const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
-        maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
-        maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
-        attribution: ESRI_SATELLITE_CONFIG.attribution
-      }).addTo(map);
+      const esriSatLayer = createEsriTileLayer().addTo(map);
 
       phase1MapInstance.current = map;
       phase1MarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2354,11 +2346,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         scrollWheelZoom: false
       });
 
-      const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
-        maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
-        maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
-        attribution: ESRI_SATELLITE_CONFIG.attribution
-      }).addTo(map);
+      const esriSatLayer = createEsriTileLayer().addTo(map);
 
       reportMapInstance.current = map;
       reportMarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2606,11 +2594,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
       attributionControl: false
     });
 
-    const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
-      maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
-      maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
-      attribution: ESRI_SATELLITE_CONFIG.attribution
-    }).addTo(map);
+    const esriSatLayer = createEsriTileLayer().addTo(map);
 
     inspectorMapInstance.current = map;
     const markersGroup = window.L.layerGroup().addTo(map);

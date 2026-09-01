@@ -13,7 +13,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(line_buffering=True, write_through=True)
 
-from app.config import PORT, HOST, DIST_DIR
+from app.config import PORT, HOST, DIST_DIR, ESRI_API_KEY
 from app.database import initialize_db
 from app.logging_config import setup_logging, get_logger
 from app.error_handlers import register_error_handlers
@@ -33,6 +33,14 @@ setup_logging()
 initialize_db()
 
 logger = get_logger("app.main")
+
+# Verify and log ESRI Basemap status
+if ESRI_API_KEY:
+    masked_key = ESRI_API_KEY[:4] + "..." + ESRI_API_KEY[-4:] if len(ESRI_API_KEY) > 8 else "***"
+    logger.info(f"[gis.esri] ESRI API key active ({masked_key}). Authenticated World Imagery pure satellite pipeline active.")
+else:
+    logger.warning("[gis.esri] Notice: No ESRI API key configured in .env. Fallback active: using public unauthenticated World Imagery pure satellite service.")
+
 
 # 2. Create FastAPI instance
 app = FastAPI(
