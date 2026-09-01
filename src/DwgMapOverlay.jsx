@@ -12,7 +12,7 @@ import {
 import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
 import { parseCadClientSide } from './utils/cadClientParser';
-import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer, createScaleDependentSatelliteLayer } from './utils/esriTileService';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer } from './utils/esriTileService';
 
 // ══════════════════════════════════════════════════════════════════════
 // 1. Standardized Neutral & In-Browser Basemap Configurations (ESRI Pure Satellite)
@@ -1352,9 +1352,7 @@ const DwgMapOverlay = ({
         subdomains: preset.subdomains
       };
       if (preset.tileSize) { tileOpts.tileSize = preset.tileSize; }
-      if (preset.zoomOffset !== undefined) { tileOpts.zoomOffset = preset.zoomOffset; }
-      // Seamless scale-dependent satellite imagery layer (World Imagery < 16, Clarity High-Res >= 16)
-      baseTileLayerRef.current = createScaleDependentSatelliteLayer(map, tileOpts);
+      baseTileLayerRef.current = createEsriTileLayer(tileOpts).addTo(map);
 
       mapInstanceRef.current = map;
       markersLayerRef.current = window.L.layerGroup({ pane: 'trafficSignsPane' }).addTo(map);
