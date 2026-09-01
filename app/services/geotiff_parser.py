@@ -116,12 +116,13 @@ def generate_sample_survey_cog_bytes(
     center_lat: float = 24.4686,
     center_lng: float = 39.6120,
     span_meters: float = 400.0,
-    width: int = 512,
-    height: int = 512
+    width: int = 1024,
+    height: int = 1024
 ) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Generates an ultra-high-resolution, georeferenced survey GeoTIFF around the project center.
-    Contains realistic sub-meter engineering survey grid, road markings, and work zone textures.
+    Generates an ultra-high-resolution (sub-meter ~0.4m/px), georeferenced survey GeoTIFF
+    around the project center. Contains crisp engineering survey grid, road markings,
+    zebra pedestrian crossings, and work zone textures.
     Returns (tiff_bytes, metadata_dict).
     """
     import numpy as np
@@ -140,45 +141,61 @@ def generate_sample_survey_cog_bytes(
     res_x = (max_lng - min_lng) / width
     res_y = (max_lat - min_lat) / height
 
-    # 1. Base raster layer (Natural ground terrain & asphalt)
+    # 1. Base raster layer (Natural ground terrain)
     img = np.zeros((height, width, 3), dtype=np.uint8)
-    # Sandy urban terrain
-    img[:, :] = [198, 185, 160]
+    img[:, :] = [182, 170, 144]
 
     # Road corridor across center
-    rw = int(height * 0.35)
+    rw = int(height * 0.38)
     y_start = height // 2 - rw // 2
     y_end = height // 2 + rw // 2
-    img[y_start:y_end, :] = [52, 58, 64]  # High-grade asphalt
+    img[y_start:y_end, :] = [46, 52, 58]  # Deep high-grade asphalt
 
-    # Yellow road centerlines
-    img[height // 2 - 2: height // 2 + 2, :] = [245, 158, 11]
+    # Double yellow road centerlines
+    img[height // 2 - 4: height // 2 - 1, :] = [255, 204, 0]
+    img[height // 2 + 1: height // 2 + 4, :] = [255, 204, 0]
 
-    # White lane edge lines
-    img[y_start + 4: y_start + 7, :] = [240, 240, 240]
-    img[y_end - 7: y_end - 4, :] = [240, 240, 240]
+    # Dashed lane dividers
+    lane_offset = rw // 4
+    for x in range(0, width, 48):
+        img[height // 2 - lane_offset - 2: height // 2 - lane_offset + 2, x:x + 28] = [255, 255, 255]
+        img[height // 2 + lane_offset - 2: height // 2 + lane_offset + 2, x:x + 28] = [255, 255, 255]
+
+    # White lane outer edge lines
+    img[y_start + 6: y_start + 10, :] = [255, 255, 255]
+    img[y_end - 10: y_end - 6, :] = [255, 255, 255]
+
+    # Zebra pedestrian crosswalk near west intersection
+    zx_walk = int(width * 0.22)
+    for zy in range(y_start + 12, y_end - 12, 32):
+        img[zy:zy + 18, zx_walk:zx_walk + 70] = [255, 255, 255]
 
     # Survey target area (Excavation & Work Zone with safety border)
-    zx_start = int(width * 0.35)
-    zx_end = int(width * 0.65)
+    zx_start = int(width * 0.40)
+    zx_end = int(width * 0.72)
     zy_start = int(height * 0.38)
     zy_end = int(height * 0.62)
-    # Work zone asphalt removal / excavation ground
-    img[zy_start:zy_end, zx_start:zx_end] = [160, 110, 60]
+    img[zy_start:zy_end, zx_start:zx_end] = [155, 105, 55]  # Excavated trench ground
 
     # Red & White barrier wall perimeter
-    for b in range(4):
+    for b in range(6):
         # Top barrier
         img[zy_start + b * 2: zy_start + b * 2 + 2, zx_start:zx_end] = [239, 68, 68] if b % 2 == 0 else [255, 255, 255]
         # Bottom barrier
         img[zy_end - b * 2 - 2: zy_end - b * 2, zx_start:zx_end] = [239, 68, 68] if b % 2 == 0 else [255, 255, 255]
 
     # High-accuracy 10m survey grid ticks (Sub-meter precision overlay)
-    grid_spacing = width // 8
+    grid_spacing = width // 16
     for gx in range(0, width, grid_spacing):
-        img[:, gx:gx + 1] = [14, 165, 233]  # Sky-blue survey grid
+        img[:, gx:gx + 1] = [14, 165, 233]  # Sky-blue survey grid line
     for gy in range(0, height, grid_spacing):
         img[gy:gy + 1, :] = [14, 165, 233]
+
+    # Survey coordinate crosses at grid intersections
+    for gx in range(grid_spacing, width, grid_spacing):
+        for gy in range(grid_spacing, height, grid_spacing):
+            img[gy - 5: gy + 6, gx - 1: gx + 2] = [255, 255, 255]
+            img[gy - 1: gy + 2, gx - 5: gx + 6] = [255, 255, 255]
 
     buf = io.BytesIO()
     extratags = [

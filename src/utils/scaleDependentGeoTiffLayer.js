@@ -191,18 +191,18 @@ export class ScaleDependentGeoTiffController {
 
       const bboxKey = interWest.toFixed(4) + '_' + interSouth.toFixed(4) + '_' + interEast.toFixed(4) + '_' + interNorth.toFixed(4);
 
-      let dataUrl = this.cache.get(bjoxKey);
+      let dataUrl = this.cache.get(bboxKey);
 
       if (!dataUrl) {
         const reqBbox = [interWest, interSouth, interEast, interNorth];
-        dataUrl = await this.cogService.readRgbWindow(reqBbox, 512, 512);
+        dataUrl = await this.cogService.readRgbWindow(reqBbox, 1024, 1024);
 
         if (dataUrl) {
           if (this.cache.size >= this.maxCacheEntries) {
             const firstKey = this.cache.keys().next().value;
             this.cache.delete(firstKey);
           }
-          this.cache.set(bjoxKey, dataUrl);
+          this.cache.set(bboxKey, dataUrl);
         }
       }
 
@@ -212,6 +212,12 @@ export class ScaleDependentGeoTiffController {
           [interNorth, interEast]
         ];
 
+        // Ensure dedicated pane exists directly above satellite basemap (zIndex: 200) and below CAD (zIndex: 500)
+        if (!this.map.getPane('geoTiffPane')) {
+          this.map.createPane('geoTiffPane');
+          this.map.getPane('geoTiffPane').style.zIndex = '250';
+        }
+
         if (this.rasterOverlay) {
           this.rasterOverlay.setBounds(renderBounds);
           this.rasterOverlay.setUrl(dataUrl);
@@ -220,7 +226,7 @@ export class ScaleDependentGeoTiffController {
           this.rasterOverlay = window.L.imageOverlay(dataUrl, renderBounds, {
             opacity: this.opacity,
             interactive: false,
-            pane: 'cadVectorPane'
+            pane: 'geoTiffPane'
           }).addTo(this.map);
         }
       }
