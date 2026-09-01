@@ -13,6 +13,7 @@ import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
 import { parseCadClientSide } from './utils/cadClientParser';
 import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer } from './utils/esriTileService';
+import { ScaleDependentGeoTiffController, getMapScaleRatio } from './utils/scaleDependentGeoTiffLayer';
 
 // ══════════════════════════════════════════════════════════════════════
 // 1. Standardized Neutral & In-Browser Basemap Configurations (ESRI Pure Satellite)
@@ -561,6 +562,22 @@ const DwgMapOverlay = ({
   const [historyStack, setHistoryStack] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const dragSnapshotRef = useRef(null);
+
+  // ── Scale-Dependent High-Accuracy GeoTIFF Imagery Layer State ──
+  const [geoTiffEnabled, setGeoTiffEnabled] = useState(true);
+  const [geoTiffThreshold, setGeoTiffThreshold] = useState(16);
+  const [geoTiffOpacity, setGeoTiffOpacity] = useState(0.95);
+  const [showGeoTiffConfig, setShowGeoTiffConfig] = useState(false);
+  const [geoTiffState, setGeoTiffState] = useState({
+    active: false,
+    currentZoom: 18,
+    minZoomThreshold: 16,
+    scaleRatio: '1:4,500',
+    isAboveThreshold: true,
+    intersects: false,
+    loading: false
+  });
+  const geoTiffControllerRef = useRef(null);
 
   // ── Refs ──
   const mapContainerRef = useRef(null);
@@ -1359,6 +1376,24 @@ const DwgMapOverlay = ({
       markersLayerRef.current = window.L.layerGroup({ pane: 'trafficSignsPane' }).addTo(map);
       setMapReady(true);
 
+      // Initialize Scale-Dependent High-Accuracy GeoTIFF Imagery Layer
+      const lat = dwgData?.centerLatLng ? dwgData.centerLatLng[0] : anchorLat;
+      const lng = dwgData?.centerLatLng ? dwgData.centerLatLng[1] : anchorLng;
+      const deltaDeg = 0.0025;
+      const surveyBounds = [
+        [lat - deltaDeg, lng - deltaDeg],
+        [lat + deltaDeg, lng + deltaDeg]
+      ];
+
+      geoTiffControllerRef.current = new ScaleDependentGeoTiffController(map, {
+        cogUrl: `/api/geotiff/sample-survey.tif?lat=${lat}&lng=${lng}`,
+        surveyBounds,
+        minZoomThreshold: geoTiffThreshold,
+        opacity: geoTiffOpacity,
+        enabled: geoTiffEnabled,
+        onStateChange: (st) => setGeoTiffState(st)
+      });
+
       map.invalidateSize();
       setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 150);
       setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 500);
@@ -1366,6 +1401,10 @@ const DwgMapOverlay = ({
 
     return () => {
       clearTimeout(initTimer);
+      if (geoTiffControllerRef.current) {
+        geoTiffControllerRef.current.destroy();
+        geoTiffControllerRef.current = null;
+      }
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -1373,6 +1412,15 @@ const DwgMapOverlay = ({
       }
     };
   }, [anchorLat, anchorLng, isMapActive]);
+
+  // Sync GeoTIFF controller options on state changes
+  useEffect(() => {
+    if (geoTiffControllerRef.current) {
+      geoTiffControllerRef.current.setEnabled(geoTiffEnabled);
+      geoTiffControllerRef.current.setMinZoomThreshold(geoTiffThreshold);
+      geoTiffControllerRef.current.setOpacity(geoTiffOpacity);
+    }
+  }, [geoTiffEnabled, geoTiffThreshold, geoTiffOpacity]);
 
   // ── 2. Switch Basemap (Neutral & COG) ──
   const handleBasemapChange = (key) => {
@@ -3130,9 +3178,113 @@ const DwgMapOverlay = ({
             <div className={`${showKeymapSidebar ? 'lg:col-span-8' : 'lg:col-span-12'} relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-950 transition-all duration-300`} style={{ minHeight: '640px' }}>
               <div ref={mapContainerRef} className="absolute inset-0 z-0" />
 
+              {/* ── Scale-Dependent High-Accuracy GeoTIFF Status Pill ── */}
+              <div className="absolute top-3 left-3 z-20 flex flex-col gap-1.5 max-w-sm">
+                <div className="bg-slate-950/90 text-slate-100 px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur-md border border-slate-700/80 shadow-2xl flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 font-mono text-[11px] text-teal-400 font-bold bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
+                    <span className="text-slate-400">Scale:</span>
+                    <span>{geoTiffState.scaleRatio || '1:9,000'}</span>
+                    <span className="text-slate-600">|</span>
+                    <span className="text-slate-400">Z:</span>
+                    <span>{geoTiffState.currentZoom || 16}</span>
+                  </div>
+
+                  {/* Status Indicator */}
+                  {geoTiffState.active ? (
+                    <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-[11px]">{isAr ? '✨ GeoTIFF فائق الدقة (نشط)' : '✨ High-Res GeoTIFF Active'}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-slate-300">
+                      <span className="h-2 w-2 rounded-full bg-sky-400"></span>
+                      <span className="text-[11px] text-slate-300">{isAr ? '🛰️ قمر صناعي (Esri)' : '🛰️ Esri Satellite'}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (mapInstanceRef.current && geoTiffControllerRef.current) {
+                            mapInstanceRef.current.fitBounds(geoTiffControllerRef.current.surveyBounds, { maxZoom: 17, animate: true });
+                          }
+                        }}
+                        className="text-[10px] bg-sky-500/20 hover:bg-sky-500/40 text-sky-300 border border-sky-500/50 px-1.5 py-0.5 rounded cursor-pointer transition font-bold"
+                        title={isAr ? 'التركيز على منطقة المسح عالية الدقة' : 'Focus survey footprint'}
+                      >
+                        {isAr ? 'تركيز 🎯' : 'Focus 🎯'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Settings Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowGeoTiffConfig(prev => !prev)}
+                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition cursor-pointer"
+                    title={isAr ? 'إعدادات طبقة GeoTIFF المساحية' : 'GeoTIFF Layer Settings'}
+                  >
+                    <Sliders className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* GeoTIFF Config Popover */}
+                {showGeoTiffConfig && (
+                  <div className="bg-slate-900/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl backdrop-blur-md text-xs text-slate-200 flex flex-col gap-2.5 w-64 animate-fade-in z-30">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-800 font-bold text-teal-400">
+                      <span>{isAr ? '⚙️ إعدادات طبقة GeoTIFF' : '⚙️ GeoTIFF Settings'}</span>
+                      <button onClick={() => setShowGeoTiffConfig(false)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span>{isAr ? 'تفعيل الطبقة التلقائية:' : 'Enable Layer:'}</span>
+                      <input
+                        type="checkbox"
+                        checked={geoTiffEnabled}
+                        onChange={e => setGeoTiffEnabled(e.target.checked)}
+                        className="rounded accent-teal-500 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>{isAr ? 'عتبة التقريب (Zoom Trigger):' : 'Zoom Trigger:'}</span>
+                        <span className="font-bold text-sky-400">Zoom {geoTiffThreshold}+</span>
+                      </div>
+                      <select
+                        value={geoTiffThreshold}
+                        onChange={e => setGeoTiffThreshold(Number(e.target.value))}
+                        className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 cursor-pointer"
+                      >
+                        <option value={15}>Zoom 15+ (~1:18,000)</option>
+                        <option value={16}>Zoom 16+ (~1:9,000 Standard)</option>
+                        <option value={17}>Zoom 17+ (~1:4,500 Detailed)</option>
+                        <option value={18}>Zoom 18+ (~1:2,200 Ultra-Close)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>{isAr ? 'شفافية الصورة:' : 'Opacity:'}</span>
+                        <span className="font-bold text-teal-400">{Math.round(geoTiffOpacity * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="1.0"
+                        step="0.05"
+                        value={geoTiffOpacity}
+                        onChange={e => setGeoTiffOpacity(parseFloat(e.target.value))}
+                        className="accent-teal-500 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Spatial Drag Handle Banner */}
               {!isLocked && !isMultiLayerDrawingMode && hasImportedCad && (
-                <div className="absolute top-3 left-3 z-10 bg-slate-950/85 text-blue-300 px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border border-blue-500/40 shadow-lg flex items-center gap-1.5">
+                <div className="absolute top-12 left-3 z-10 bg-slate-950/85 text-blue-300 px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border border-blue-500/40 shadow-lg flex items-center gap-1.5">
                   <span className="animate-pulse">✥</span>
                   <span>{isAr ? 'اسحب المقبض الأزرق لتحريك المخطط، واسحب أي لوحة لتغيير موقعها' : 'Drag blue handle to align CAD, drag any sign to move'}</span>
                 </div>

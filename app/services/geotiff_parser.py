@@ -110,3 +110,102 @@ def parse_geotiff_bytes(file_bytes: bytes, filename: str) -> Dict[str, Any]:
             "resolution": [abs(res_x), abs(res_y)],
             "geoKeys": geokeys
         }
+
+
+def generate_sample_survey_cog_bytes(
+    center_lat: float = 24.4686,
+    center_lng: float = 39.6120,
+    span_meters: float = 400.0,
+    width: int = 512,
+    height: int = 512
+) -> Tuple[bytes, Dict[str, Any]]:
+    """
+    Generates an ultra-high-resolution, georeferenced survey GeoTIFF around the project center.
+    Contains realistic sub-meter engineering survey grid, road markings, and work zone textures.
+    Returns (tiff_bytes, metadata_dict).
+    """
+    import numpy as np
+
+    # Calculate geographic span
+    m_to_lat = 1.0 / 110574.61
+    m_to_lng = 1.0 / (111320.0 * np.cos(np.radians(center_lat)))
+    half_span_lat = (span_meters / 2.0) * m_to_lat
+    half_span_lng = (span_meters / 2.0) * m_to_lng
+
+    min_lat = center_lat - half_span_lat
+    max_lat = center_lat + half_span_lat
+    min_lng = center_lng - half_span_lng
+    max_lng = center_lng + half_span_lng
+
+    res_x = (max_lng - min_lng) / width
+    res_y = (max_lat - min_lat) / height
+
+    # 1. Base raster layer (Natural ground terrain & asphalt)
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    # Sandy urban terrain
+    img[:, :] = [198, 185, 160]
+
+    # Road corridor across center
+    rw = int(height * 0.35)
+    y_start = height // 2 - rw // 2
+    y_end = height // 2 + rw // 2
+    img[y_start:y_end, :] = [52, 58, 64]  # High-grade asphalt
+
+    # Yellow road centerlines
+    img[height // 2 - 2: height // 2 + 2, :] = [245, 158, 11]
+
+    # White lane edge lines
+    img[y_start + 4: y_start + 7, :] = [240, 240, 240]
+    img[y_end - 7: y_end - 4, :] = [240, 240, 240]
+
+    # Survey target area (Excavation & Work Zone with safety border)
+    zx_start = int(width * 0.35)
+    zx_end = int(width * 0.65)
+    zy_start = int(height * 0.38)
+    zy_end = int(height * 0.62)
+    # Work zone asphalt removal / excavation ground
+    img[zy_start:zy_end, zx_start:zx_end] = [160, 110, 60]
+
+    # Red & White barrier wall perimeter
+    for b in range(4):
+        # Top barrier
+        img[zy_start + b * 2: zy_start + b * 2 + 2, zx_start:zx_end] = [239, 68, 68] if b % 2 == 0 else [255, 255, 255]
+        # Bottom barrier
+        img[zy_end - b * 2 - 2: zy_end - b * 2, zx_start:zx_end] = [239, 68, 68] if b % 2 == 0 else [255, 255, 255]
+
+    # High-accuracy 10m survey grid ticks (Sub-meter precision overlay)
+    grid_spacing = width // 8
+    for gx in range(0, width, grid_spacing):
+        img[:, gx:gx + 1] = [14, 165, 233]  # Sky-blue survey grid
+    for gy in range(0, height, grid_spacing):
+        img[gy:gy + 1, :] = [14, 165, 233]
+
+    buf = io.BytesIO()
+    extratags = [
+        (33550, 'd', 3, [res_x, res_y, 0.0], False),                   # ModelPixelScaleTag
+        (33922, 'd', 6, [0.0, 0.0, 0.0, min_lng, max_lat, 0.0], False), # ModelTiepointTag
+        (34735, 'H', 8, [1, 1, 0, 1, 1024, 0, 1, 2], False),            # GeoKeyDirectoryTag (ModelTypeGeographic)
+    ]
+
+    tifffile.imwrite(buf, img, photometric='rgb', extratags=extratags)
+    tiff_bytes = buf.getvalue()
+
+    metadata = {
+        "success": True,
+        "fileName": "Amanah_Madinah_HighRes_Survey_Grid.tif",
+        "fileSize": len(tiff_bytes),
+        "width": width,
+        "height": height,
+        "crs": "EPSG:4326",
+        "bounds": [
+            [min_lat, min_lng],
+            [max_lat, max_lng]
+        ],
+        "center": [center_lat, center_lng],
+        "resolution": [res_x, res_y],
+        "minZoomThreshold": 16,
+        "spanMeters": span_meters
+    }
+
+    return tiff_bytes, metadata
+
