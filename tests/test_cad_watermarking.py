@@ -91,3 +91,44 @@ def test_build_watermarked_dxf_from_features():
     assert "WORK_ZONE_BOUNDARY" in dxf
     assert "PLATFORM_DIGITAL_WATERMARK" in dxf
     assert "EOF" in dxf
+
+
+def test_custom_labels_in_cad():
+    labels = [
+        {"text": "STA 0+150 EMERGENCY EXIT", "lat": 24.4686, "lng": 39.6120},
+        {"text": "CHECKPOINT A", "lat": 24.4689, "lng": 39.6123}
+    ]
+
+    # Test build_6node_dxf
+    dxf_6node = build_6node_dxf(
+        nodes=[{"lat": 24.4686, "lng": 39.6120}, {"lat": 24.4688, "lng": 39.6122}, {"lat": 24.4690, "lng": 39.6124}],
+        labels=labels,
+        project_name="Label Verification Site",
+        lat=24.4686,
+        lng=39.6120
+    )
+    assert "ANNOTATIONS_AND_LABELS" in dxf_6node
+    assert "STA 0+150 EMERGENCY EXIT" in dxf_6node
+    assert "CHECKPOINT A" in dxf_6node
+
+    # Test build_watermarked_dxf_from_features
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [39.6120, 24.4686]},
+                "properties": {"text": "STA 0+150 EMERGENCY EXIT", "layer": "ANNOTATIONS_AND_LABELS"}
+            }
+        ]
+    }
+    dxf_watermarked = build_watermarked_dxf_from_features(
+        geojson=geojson,
+        labels=labels,
+        project_name="Watermark Label Test",
+        lat=24.4686,
+        lng=39.6120
+    )
+    assert "ANNOTATIONS_AND_LABELS" in dxf_watermarked
+    assert "STA 0+150 EMERGENCY EXIT" in dxf_watermarked
+

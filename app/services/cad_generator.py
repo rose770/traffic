@@ -31,6 +31,7 @@ def build_6node_dxf(
     barrier_nodes: Optional[List[Dict[str, Any]]] = None,
     barrier_type: str = "concrete_njb",
     placed_elements: Optional[List[Dict[str, Any]]] = None,
+    labels: Optional[List[Dict[str, Any]]] = None,
     project_name: str = "Traffic Detour & Construction Corridor",
     lat: float = 24.4686,
     lng: float = 39.6120,
@@ -68,6 +69,7 @@ def build_6node_dxf(
     doc.layers.add("ROAD_BOUNDARY", color=4)               # 4 = Cyan (#06B6D4)
     doc.layers.add("CENTERLINE_AXIS", color=7)             # 7 = White
     doc.layers.add("TRAFFIC_SIGNS_AND_BARRIERS", color=4)  # 4 = Cyan / Signs
+    doc.layers.add("ANNOTATIONS_AND_LABELS", color=4)      # 4 = Cyan / Text Labels & Notes
     doc.layers.add("PLATFORM_DIGITAL_WATERMARK", color=6)   # 6 = Magenta / Security
 
     all_x: List[float] = []
@@ -207,6 +209,30 @@ def build_6node_dxf(
             t = msp.add_text(f"[{el_type.upper()}]", dxfattribs={"layer": "TRAFFIC_SIGNS_AND_BARRIERS", "height": 1.0, "rotation": float(rot), "color": 4})
             t.set_placement((ep["x"] + 0.8, ep["y"] + 0.8))
 
+    # ── 5b. Custom Text Labels (Annotations, Notes, Stationing) ──
+    if labels:
+        for lbl in labels:
+            lbl_text = lbl.get("text") or lbl.get("label") or ""
+            if not lbl_text:
+                continue
+            lbl_lat = lbl.get("lat")
+            lbl_lng = lbl.get("lng")
+            if lbl_lat is not None and lbl_lng is not None:
+                lp = _gps_to_utm37n(float(lbl_lat), float(lbl_lng), center_lat, center_lng)
+            elif "x" in lbl and "y" in lbl:
+                lp = {"x": float(lbl["x"]), "y": float(lbl["y"])}
+            else:
+                continue
+
+            all_x.append(lp["x"])
+            all_y.append(lp["y"])
+
+            # Node anchor circle
+            msp.add_circle((lp["x"], lp["y"]), radius=0.4, dxfattribs={"layer": "ANNOTATIONS_AND_LABELS", "color": 4})
+            # AutoCAD TEXT entity
+            t = msp.add_text(str(lbl_text), dxfattribs={"layer": "ANNOTATIONS_AND_LABELS", "height": 1.2, "color": 4})
+            t.set_placement((lp["x"] + 0.6, lp["y"] + 0.6))
+
     # Fallback to origin if no elements
     if not all_x:
         all_x = [ox]
@@ -262,6 +288,7 @@ def build_6node_dxf(
 def build_watermarked_dxf_from_features(
     geojson: Dict[str, Any],
     placed_elements: Optional[List[Dict[str, Any]]] = None,
+    labels: Optional[List[Dict[str, Any]]] = None,
     project_name: str = "Amanah Madinah Detour Blueprint",
     lat: float = 24.4686,
     lng: float = 39.6120,
@@ -292,6 +319,7 @@ def build_watermarked_dxf_from_features(
     doc.layers.add("ROAD_BOUNDARY", color=4)
     doc.layers.add("CENTERLINE_AXIS", color=7)
     doc.layers.add("TRAFFIC_SIGNS_AND_BARRIERS", color=4)
+    doc.layers.add("ANNOTATIONS_AND_LABELS", color=4)
     doc.layers.add("PLATFORM_DIGITAL_WATERMARK", color=6)
 
     all_x: List[float] = []
@@ -335,10 +363,11 @@ def build_watermarked_dxf_from_features(
             u = _gps_to_utm37n(float(coords[1]), float(coords[0]), center_lat, center_lng)
             all_x.append(u["x"])
             all_y.append(u["y"])
-            txt = props.get("text", "")
+            txt = props.get("text", "") or props.get("label", "")
             if txt:
-                t = msp.add_text(txt, dxfattribs={"layer": layer_name, "height": 1.0})
-                t.set_placement((u["x"], u["y"]))
+                msp.add_circle((u["x"], u["y"]), radius=0.4, dxfattribs={"layer": layer_name})
+                t = msp.add_text(str(txt), dxfattribs={"layer": layer_name, "height": 1.2})
+                t.set_placement((u["x"] + 0.6, u["y"] + 0.6))
             else:
                 msp.add_circle((u["x"], u["y"]), radius=0.8, dxfattribs={"layer": layer_name})
 
@@ -360,6 +389,28 @@ def build_watermarked_dxf_from_features(
             msp.add_circle((ep["x"], ep["y"]), radius=0.8, dxfattribs={"layer": "TRAFFIC_SIGNS_AND_BARRIERS", "color": 4})
             t = msp.add_text(f"[{el_type.upper()}]", dxfattribs={"layer": "TRAFFIC_SIGNS_AND_BARRIERS", "height": 1.0, "rotation": float(rot), "color": 4})
             t.set_placement((ep["x"] + 0.8, ep["y"] + 0.8))
+
+    # Explicit Custom Text Labels (if passed directly)
+    if labels:
+        for lbl in labels:
+            lbl_text = lbl.get("text") or lbl.get("label") or ""
+            if not lbl_text:
+                continue
+            lbl_lat = lbl.get("lat")
+            lbl_lng = lbl.get("lng")
+            if lbl_lat is not None and lbl_lng is not None:
+                lp = _gps_to_utm37n(float(lbl_lat), float(lbl_lng), center_lat, center_lng)
+            elif "x" in lbl and "y" in lbl:
+                lp = {"x": float(lbl["x"]), "y": float(lbl["y"])}
+            else:
+                continue
+
+            all_x.append(lp["x"])
+            all_y.append(lp["y"])
+
+            msp.add_circle((lp["x"], lp["y"]), radius=0.4, dxfattribs={"layer": "ANNOTATIONS_AND_LABELS", "color": 4})
+            t = msp.add_text(str(lbl_text), dxfattribs={"layer": "ANNOTATIONS_AND_LABELS", "height": 1.2, "color": 4})
+            t.set_placement((lp["x"] + 0.6, lp["y"] + 0.6))
 
     if not all_x:
         all_x = [ox]

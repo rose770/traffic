@@ -87,6 +87,7 @@ import SixDofNodeInspector from './components/SixDofNodeInspector';
 import SixDofGizmo from './components/SixDofGizmo';
 import GeoreferencedReportModal from './components/GeoreferencedReportModal';
 import { RoadAutocomplete } from './components/RoadAutocomplete';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG } from './utils/esriTileService';
 import {
   DURATION_CATEGORIES,
   ROAD_CLASSIFICATIONS,
@@ -556,10 +557,10 @@ const ReportSatelliteMapView = ({ permit, language = 'ar' }) => {
       attributionControl: false
     });
 
-    window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      maxZoom: 20,
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      attribution: 'Map data &copy; Google Maps Satellite'
+    window.L.tileLayer(getEsriSatelliteUrl(), {
+      maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+      maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
+      attribution: ESRI_SATELLITE_CONFIG.attribution
     }).addTo(map);
 
     const latlngs = [];
@@ -1708,7 +1709,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     stagingDesignated: true,
   });
 
-  // Phase 1 Site Overview Map Refs (Google Satellite — construction + detour + pedestrian nodes)
+  // Phase 1 Site Overview Map Refs (ESRI World Imagery Pure Satellite - construction + detour + pedestrian nodes)
   const phase1MapContainerRef = React.useRef(null);
   const phase1MapInstance = React.useRef(null);
   const phase1MarkersGroupRef = React.useRef(null);
@@ -2175,27 +2176,11 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         attributionControl: false
       });
 
-      const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-        maxZoom: 20,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-        attribution: 'Map data &copy; Google Maps Satellite'
+      const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
+        maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+        maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
+        attribution: ESRI_SATELLITE_CONFIG.attribution
       }).addTo(map);
-
-      const esriSatLayer = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19,
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar'
-      });
-
-      const googleHybridLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        maxZoom: 20,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
-      });
-
-      window.L.control.layers({
-        "🛰️ Google Satellite (Pure)": googlePureSatLayer,
-        "🛰️ Esri Satellite": esriSatLayer,
-        "🌍 Google Hybrid (Labels)": googleHybridLayer
-      }, null, { position: 'topright' }).addTo(map);
 
       phase1MapInstance.current = map;
       phase1MarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2369,27 +2354,11 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         scrollWheelZoom: false
       });
 
-      const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-        maxZoom: 20,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-        attribution: 'Map data &copy; Google Maps Satellite'
+      const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
+        maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+        maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
+        attribution: ESRI_SATELLITE_CONFIG.attribution
       }).addTo(map);
-
-      const esriSatLayer = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19,
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar'
-      });
-
-      const googleHybridLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        maxZoom: 20,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
-      });
-
-      window.L.control.layers({
-        "🛰️ Google Satellite (Pure)": googlePureSatLayer,
-        "🛰️ Esri Satellite": esriSatLayer,
-        "🌍 Google Hybrid (Labels)": googleHybridLayer
-      }, null, { position: 'topright' }).addTo(map);
 
       reportMapInstance.current = map;
       reportMarkersGroupRef.current = window.L.layerGroup().addTo(map);
@@ -2637,33 +2606,11 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
       attributionControl: false
     });
 
-    const googlePureSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      maxZoom: 20,
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      attribution: 'Map data &copy; Google Maps Satellite'
+    const esriSatLayer = window.L.tileLayer(getEsriSatelliteUrl(), {
+      maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+      maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
+      attribution: ESRI_SATELLITE_CONFIG.attribution
     }).addTo(map);
-
-    const googleSatLayer = window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-      maxZoom: 20,
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      attribution: 'Map data &copy; Google Maps Satellite'
-    });
-
-    const satLayer = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar'
-    });
-
-    const cartoLayer = window.L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19
-    });
-
-    window.L.control.layers({
-      "🌍 Google Satellite (Hybrid)": googleSatLayer,
-      "🛰️ Google Satellite (Pure)": googlePureSatLayer,
-      "🛰️ Esri Satellite": satLayer,
-      "🗺️ Base Map": cartoLayer
-    }, null, { position: 'topright' }).addTo(map);
 
     inspectorMapInstance.current = map;
     const markersGroup = window.L.layerGroup().addTo(map);

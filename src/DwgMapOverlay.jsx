@@ -12,30 +12,20 @@ import {
 import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
 import { parseCadClientSide } from './utils/cadClientParser';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG } from './utils/esriTileService';
 
 // ══════════════════════════════════════════════════════════════════════
-// 1. Standardized Neutral & In-Browser Basemap Configurations
+// 1. Standardized Neutral & In-Browser Basemap Configurations (ESRI Pure Satellite)
 // ══════════════════════════════════════════════════════════════════════
 const BASEMAP_PRESETS = {
-  satellite: {
-    id: 'satellite',
-    nameAr: '🛰️ قمر صناعي نقي (Google Satellite HD)',
-    nameEn: 'Google Satellite HD',
-    url: 'https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&scale=2',
-    subdomains: ['0', '1', '2', '3'],
-    maxZoom: 22,
-    maxNativeZoom: 20,
-    tileSize: 512,
-    zoomOffset: -1
-  },
   esri_satellite: {
     id: 'esri_satellite',
-    nameAr: '🌍 قمر صناعي عالي الوضوح (ESRI World Imagery HD - 30cm)',
-    nameEn: 'ESRI World Imagery HD (30cm)',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    subdomains: [],
-    maxZoom: 22,
-    maxNativeZoom: 19
+    nameAr: '🌍 قمر صناعي نقي عالي الدقة (ESRI World Imagery HD)',
+    nameEn: 'ESRI World Imagery HD (Pure Satellite)',
+    get url() { return getEsriSatelliteUrl(); },
+    subdomains: ESRI_SATELLITE_CONFIG.subdomains,
+    maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+    maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom
   }
 };
 
@@ -516,7 +506,7 @@ const DwgMapOverlay = ({
   const [placedElements, setPlacedElements] = useState([]);
   const [selectedElementId, setSelectedElementId] = useState(null);
   const [fileName, setFileName] = useState(preloadedDwgData?.fileName || '');
-  const [activeBasemap, setActiveBasemap] = useState('satellite');
+  const [activeBasemap, setActiveBasemap] = useState('esri_satellite');
   const [isLocked, setIsLocked] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [selectedFeatureInfo, setSelectedFeatureInfo] = useState(null);
@@ -1023,6 +1013,24 @@ const DwgMapOverlay = ({
       });
     }
 
+    // 5. Custom Text Labels (Annotations & Stationing)
+    if (customTextLabels && customTextLabels.length > 0) {
+      customTextLabels.forEach(lbl => {
+        newFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lbl.lng, lbl.lat] },
+          properties: {
+            layer: 'ANNOTATIONS_AND_LABELS',
+            motGroup: 'ANNOTATION_GUIDES',
+            color: '#38BDF8',
+            text: lbl.text,
+            label: lbl.text,
+            isAnnotationText: true
+          }
+        });
+      });
+    }
+
     const updatedGeojson = {
       type: 'FeatureCollection',
       features: [...(dwgData?.geojson?.features || []), ...newFeatures]
@@ -1054,6 +1062,7 @@ const DwgMapOverlay = ({
           barrierNodes: drawnBarrierNodes,
           barrierType: selectedBarrierType,
           placedElements,
+          labels: customTextLabels,
           projectName: roadName || 'Amanah Detour Site',
           lat: anchorLat,
           lng: anchorLng,
@@ -1082,12 +1091,39 @@ const DwgMapOverlay = ({
     }
     setIsWatermarking(true);
     try {
+      // Ensure any customTextLabels not yet committed are included in geojson export
+      const exportGeojson = JSON.parse(JSON.stringify(dwgData.geojson));
+      if (customTextLabels && customTextLabels.length > 0) {
+        customTextLabels.forEach(lbl => {
+          const alreadyExists = exportGeojson.features.some(
+            f => f.properties?.text === lbl.text &&
+                 Math.abs(f.geometry?.coordinates?.[0] - lbl.lng) < 0.00001 &&
+                 Math.abs(f.geometry?.coordinates?.[1] - lbl.lat) < 0.00001
+          );
+          if (!alreadyExists) {
+            exportGeojson.features.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [lbl.lng, lbl.lat] },
+              properties: {
+                layer: 'ANNOTATIONS_AND_LABELS',
+                motGroup: 'ANNOTATION_GUIDES',
+                color: '#38BDF8',
+                text: lbl.text,
+                label: lbl.text,
+                isAnnotationText: true
+              }
+            });
+          }
+        });
+      }
+
       const res = await fetch('/api/cad/export-watermarked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          geojson: dwgData.geojson,
+          geojson: exportGeojson,
           placedElements,
+          labels: customTextLabels,
           projectName: roadName || 'Amanah Madinah Detour',
           lat: anchorLat,
           lng: anchorLng,
@@ -1309,7 +1345,7 @@ const DwgMapOverlay = ({
       map.createPane('trafficSignsPane');
       map.getPane('trafficSignsPane').style.zIndex = '700';
 
-      const preset = BASEMAP_PRESETS[activeBasemap] || BASEMAP_PRESETS.satellite;
+      const preset = BASEMAP_PRESETS[activeBasemap] || BASEMAP_PRESETS.esri_satellite;
       const tileOpts = {
         maxZoom: preset.maxZoom,
         maxNativeZoom: preset.maxNativeZoom,
@@ -1345,7 +1381,7 @@ const DwgMapOverlay = ({
     if (baseTileLayerRef.current) {
       mapInstanceRef.current.removeLayer(baseTileLayerRef.current);
     }
-    const preset = BASEMAP_PRESETS[key] || BASEMAP_PRESETS.satellite;
+    const preset = BASEMAP_PRESETS[key] || BASEMAP_PRESETS.esri_satellite;
     const tileOpts = {
       maxZoom: preset.maxZoom,
       maxNativeZoom: preset.maxNativeZoom,
@@ -2750,8 +2786,7 @@ const DwgMapOverlay = ({
                     onChange={(e) => handleBasemapChange(e.target.value)}
                     className="bg-transparent text-slate-200 font-bold text-xs focus:outline-none cursor-pointer"
                   >
-                    <option value="satellite">{isAr ? '🛰️ قمر صناعي نقي (Google Satellite HD)' : '🛰️ Google Satellite HD'}</option>
-                    <option value="esri_satellite">{isAr ? '🌍 قمر صناعي عالي الوضوح (ESRI World Imagery HD - 30cm)' : '🌍 ESRI World Imagery HD (30cm)'}</option>
+                    <option value="esri_satellite">{isAr ? '🌍 قمر صناعي نقي عالي الدقة (ESRI World Imagery)' : '🌍 ESRI World Imagery (Pure Satellite)'}</option>
                   </select>
                 </div>
 

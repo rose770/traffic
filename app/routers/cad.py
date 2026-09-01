@@ -33,6 +33,7 @@ def generate_cad(payload: GenerateCadRequest):
         barrier_nodes=payload.barrierNodes,
         barrier_type=payload.barrierType or "concrete_njb",
         placed_elements=payload.placedElements,
+        labels=payload.labels,
         project_name=payload.projectName or "Detour Work Site",
         lat=payload.lat or 24.4686,
         lng=payload.lng or 39.6120,
@@ -60,6 +61,7 @@ def export_6node_cad(payload: Export6NodeCadRequest):
         barrier_nodes=payload.barrierNodes,
         barrier_type=payload.barrierType or "concrete_njb",
         placed_elements=payload.placedElements,
+        labels=payload.labels,
         project_name=payload.projectName,
         lat=payload.lat or 24.4686,
         lng=payload.lng or 39.6120,
@@ -82,6 +84,7 @@ def export_watermarked_cad(payload: ExportWatermarkedCadRequest):
     dxf_content = build_watermarked_dxf_from_features(
         geojson=payload.geojson,
         placed_elements=payload.placedElements,
+        labels=payload.labels,
         project_name=payload.projectName,
         lat=payload.lat or 24.4686,
         lng=payload.lng or 39.6120,

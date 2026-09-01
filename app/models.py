@@ -66,6 +66,7 @@ class GenerateCadRequest(BaseModel):
     barrierNodes: Optional[List[Dict[str, Any]]] = None
     barrierType: Optional[str] = "concrete_njb"
     placedElements: Optional[List[Dict[str, Any]]] = None
+    labels: Optional[List[Dict[str, Any]]] = None
     projectName: Optional[str] = "Detour Work Site"
     editorUser: Optional[str] = "Amanah Certified Safety Engineer"
 
@@ -78,6 +79,7 @@ class Export6NodeCadRequest(BaseModel):
     barrierNodes: Optional[List[Dict[str, Any]]] = None
     barrierType: Optional[str] = "concrete_njb"
     placedElements: Optional[List[Dict[str, Any]]] = None
+    labels: Optional[List[Dict[str, Any]]] = None
     projectName: Optional[str] = "6-Node Site Traffic Corridor"
     lat: Optional[float] = 24.4686
     lng: Optional[float] = 39.6120
@@ -87,6 +89,7 @@ class Export6NodeCadRequest(BaseModel):
 class ExportWatermarkedCadRequest(BaseModel):
     geojson: Dict[str, Any]
     placedElements: Optional[List[Dict[str, Any]]] = None
+    labels: Optional[List[Dict[str, Any]]] = None
     projectName: Optional[str] = "Amanah Madinah Edited CAD"
     lat: Optional[float] = 24.4686
     lng: Optional[float] = 39.6120

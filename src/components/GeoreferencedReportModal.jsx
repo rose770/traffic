@@ -6,6 +6,7 @@ import {
   TrafficCone, Zap, Award, CheckCircle2
 } from 'lucide-react';
 import { exportDocxReport } from '../docxExport';
+import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG } from '../utils/esriTileService';
 
 // ── Rich SVG/HTML Renderer for Saudi MOT Signs & Barrier Posters in Report ──
 export const renderReportMotItemHtml = (type, rotation = 0, isAr = true) => {
@@ -286,10 +287,11 @@ export const GeoreferencedReportModal = ({
       attributionControl: false
     });
 
-    // High-Definition Google Satellite Layer
-    window.L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-      maxZoom: 20,
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+    // High-Definition Pure ESRI Satellite Layer (Without Labels)
+    window.L.tileLayer(getEsriSatelliteUrl(), {
+      maxZoom: ESRI_SATELLITE_CONFIG.maxZoom,
+      maxNativeZoom: ESRI_SATELLITE_CONFIG.maxNativeZoom,
+      attribution: ESRI_SATELLITE_CONFIG.attribution
     }).addTo(map);
 
     // 1. Render CAD Features with Strict Stage 2 Color Palette
