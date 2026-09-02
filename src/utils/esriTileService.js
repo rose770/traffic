@@ -36,7 +36,34 @@ export const recordGisLog = async (level, message, details = null) => {
   }
 };
 
+let dynamicApiKey = '';
+
+// Initialize from window if already present
+if (typeof window !== 'undefined' && window.__ESRI_API_KEY__) {
+  dynamicApiKey = window.__ESRI_API_KEY__;
+}
+
+// Fetch dynamic GIS config from backend environment on startup
+if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+  fetch('/api/system/gis-config')
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.apiKey) {
+        dynamicApiKey = data.apiKey;
+        window.__ESRI_API_KEY__ = data.apiKey;
+        recordGisLog(
+          'INFO',
+          `ESRI API key active (prefix: ${data.apiKey.slice(0, 8)}...). Authenticated World Imagery pure satellite service enabled.`,
+          { keyLength: data.apiKey.length, prefix: data.apiKey.slice(0, 8) }
+        );
+      }
+    })
+    .catch(() => {});
+}
+
 export const getEsriApiKey = () => {
+  if (dynamicApiKey) return dynamicApiKey;
+  if (typeof window !== 'undefined' && window.__ESRI_API_KEY__) return window.__ESRI_API_KEY__;
   let apiKey = '';
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
@@ -54,7 +81,8 @@ export const getEsriSatelliteUrl = () => {
   if (apiKey) {
     recordGisLog(
       'INFO',
-      'ESRI API key active. Authenticated World Imagery pure satellite service enabled.'
+      `ESRI API key active (prefix: ${apiKey.slice(0, 8)}...). Authenticated World Imagery pure satellite service enabled.`,
+      { keyLength: apiKey.length, prefix: apiKey.slice(0, 8) }
     );
     return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=' + encodeURIComponent(apiKey);
   }

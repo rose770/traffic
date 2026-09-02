@@ -13,6 +13,7 @@ import { SAUDI_CRS_PRESETS, detectSaudiCrs } from './utils/coordinateEngine';
 import { SAUDI_COG_PRESETS } from './utils/cogTileService';
 import { parseCadClientSide } from './utils/cadClientParser';
 import { getEsriSatelliteUrl, ESRI_SATELLITE_CONFIG, createEsriTileLayer } from './utils/esriTileService';
+import { evaluateMotBarrierRule } from './trafficStandards';
 
 // ══════════════════════════════════════════════════════════════════════
 // 1. Standardized Neutral & In-Browser Basemap Configurations (ESRI Pure Satellite)
@@ -484,6 +485,100 @@ const getFeatureFunctionalType = (feature) => {
 // ══════════════════════════════════════════════════════════════════════
 // Main Component: DwgMapOverlay (Browser-Only Client-Side Engine)
 // ══════════════════════════════════════════════════════════════════════
+// ── Precise Geodesic Distance & Real Coordinate Metric Helpers (WGS84) ──
+export const calculateRealPolylineLengthMeters = (nodes) => {
+  if (!nodes || nodes.length < 2) return 0;
+  let totalMeters = 0;
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const p1 = nodes[i];
+    const p2 = nodes[i + 1];
+    if (p1 && p2) {
+      const lat1 = p1.lat !== undefined ? p1.lat : p1[0];
+      const lng1 = p1.lng !== undefined ? p1.lng : p1[1];
+      const lat2 = p2.lat !== undefined ? p2.lat : p2[0];
+      const lng2 = p2.lng !== undefined ? p2.lng : p2[1];
+      if (window.L && window.L.latLng) {
+        totalMeters += window.L.latLng(lat1, lng1).distanceTo(window.L.latLng(lat2, lng2));
+      } else {
+        const R = 6378137;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLng = ((lng2 - lng1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLng / 2) *
+            Math.sin(dLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        totalMeters += R * c;
+      }
+    }
+  }
+  return Math.round(totalMeters * 10) / 10;
+};
+
+export const calculateRealPlateDimensions = (nodes) => {
+  if (!nodes || nodes.length < 4) return { widthM: 0, lengthM: 0, areaM2: 0 };
+  const d = (p1, p2) => {
+    if (window.L && window.L.latLng) {
+      return window.L.latLng(p1.lat, p1.lng).distanceTo(window.L.latLng(p2.lat, p2.lng));
+    }
+    const R = 6378137;
+    const dLat = ((p2.lat - p1.lat) * Math.PI) / 180;
+    const dLng = ((p2.lng - p1.lng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((p1.lat * Math.PI) / 180) *
+        Math.cos((p2.lat * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const edge01 = d(nodes[0], nodes[1]);
+  const edge12 = d(nodes[1], nodes[2]);
+  const edge23 = d(nodes[2], nodes[3]);
+  const edge30 = d(nodes[3], nodes[0]);
+
+  const dimA = (edge01 + edge23) / 2;
+  const dimB = (edge12 + edge30) / 2;
+
+  const widthM = Math.round(Math.min(dimA, dimB) * 10) / 10;
+  const lengthM = Math.round(Math.max(dimA, dimB) * 10) / 10;
+  const areaM2 = Math.round(widthM * lengthM * 10) / 10;
+
+  return { widthM: Math.max(0.5, widthM), lengthM: Math.max(0.5, lengthM), areaM2 };
+};
+
+export const calculateRealPolygonMetrics = (nodes) => {
+  if (!nodes || nodes.length < 3) return { perimeterM: 0, areaM2: 0 };
+  let perimeter = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const nextIdx = (i + 1) % nodes.length;
+    if (window.L && window.L.latLng) {
+      perimeter += window.L.latLng(nodes[i].lat, nodes[i].lng).distanceTo(window.L.latLng(nodes[nextIdx].lat, nodes[nextIdx].lng));
+    }
+  }
+  const originLat = nodes[0].lat;
+  const originLng = nodes[0].lng;
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLng = 111320 * Math.cos((originLat * Math.PI) / 180);
+
+  let area = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const nextIdx = (i + 1) % nodes.length;
+    const x1 = (nodes[i].lng - originLng) * metersPerDegreeLng;
+    const y1 = (nodes[i].lat - originLat) * metersPerDegreeLat;
+    const x2 = (nodes[nextIdx].lng - originLng) * metersPerDegreeLng;
+    const y2 = (nodes[nextIdx].lat - originLat) * metersPerDegreeLat;
+    area += x1 * y2 - x2 * y1;
+  }
+  return {
+    perimeterM: Math.round(perimeter * 10) / 10,
+    areaM2: Math.round(Math.abs(area / 2) * 10) / 10
+  };
+};
+
 const DwgMapOverlay = ({
   language = 'ar',
   onPlacementsChange,
@@ -493,7 +588,14 @@ const DwgMapOverlay = ({
   preloadedDwgData = null,
   autoStartDirectDrawing = false,
   onCadParsed = null,
-  onCadReset = null
+  onCadReset = null,
+  workDurationHours = 0,
+  excavationDepth = 0,
+  speedLimit = 50,
+  barriersList = [],
+  onBarriersChange = null,
+  onMapFeaturesExtracted = null,
+  isPhaseActive = true
 }) => {
   const isAr = language === 'ar';
 
@@ -542,14 +644,43 @@ const DwgMapOverlay = ({
 
   // ── Multi-Layer Interactive Site Drawing State ──
   const [isMultiLayerDrawingMode, setIsMultiLayerDrawingMode] = useState(false);
-  const [activeDrawingLayer, setActiveDrawingLayer] = useState('site'); // 'site' | 'transition' | 'barrier' | 'pedestrian' | 'labels'
+  const [activeDrawingLayer, setActiveDrawingLayer] = useState('site'); // 'site' | 'transition' | 'barrier' | 'pedestrian' | 'plates' | 'labels'
+  
+  // Single active in-progress nodes
   const [drawnSiteNodes, setDrawnSiteNodes] = useState([]); // Yellow Polygon (Work Zone Site)
-  const [drawnTransitionNodes, setDrawnTransitionNodes] = useState([]); // Red Polyline (Detour Transition Taper)
-  const [drawnBarrierNodes, setDrawnBarrierNodes] = useState([]); // Cyan Polyline (Continuous NJB Barrier Wall / Repeating Signs)
+  const [drawnTransitionNodes, setDrawnTransitionNodes] = useState([]); // Red Polyline (Detour Transition Taper currently drawing)
+  const [drawnBarrierNodes, setDrawnBarrierNodes] = useState([]); // Cyan Polyline (Barrier Wall currently drawing)
   const [selectedBarrierType, setSelectedBarrierType] = useState('concrete_njb'); // 'concrete_njb' | 'plastic_njb' | 'cones_series' | 'warning_lights_chain'
-  const [drawnPedestrianNodes, setDrawnPedestrianNodes] = useState([]); // Green Polyline (Safe Pedestrian Route - Optional)
+  const [drawnPedestrianNodes, setDrawnPedestrianNodes] = useState([]); // Green Polyline (Safe Pedestrian Route currently drawing)
+  const [drawnPlateNodes, setDrawnPlateNodes] = useState([]); // Purple 4-corner Steel Trench Plate currently drawing
   const [customTextLabels, setCustomTextLabels] = useState([]); // Custom User Placed Text Annotations & Callouts
   const [newLabelText, setNewLabelText] = useState(''); // Text input for next placed label
+
+  // Multiple Saved Features Collections
+  const [savedDetours, setSavedDetours] = useState([]); // Multiple completed detour routes
+  const [savedBarriers, setSavedBarriers] = useState([]); // Multiple completed barrier paths
+  const [savedPedestrians, setSavedPedestrians] = useState([]); // Multiple completed pedestrian corridors
+  const [savedPlates, setSavedPlates] = useState([]); // Multiple completed 4-node steel trench plates (Purple)
+  const [selectedPlateType, setSelectedPlateType] = useState('steel_40t');
+  const isDrawPanelOpen = Boolean(showKeymapSidebar && sidebarTab === 'drawing');
+  const isDrawPanelOpenRef = useRef(isDrawPanelOpen);
+  useEffect(() => {
+    isDrawPanelOpenRef.current = isDrawPanelOpen;
+    if (mapInstanceRef.current) {
+      const container = mapInstanceRef.current.getContainer();
+      if (container) {
+        container.style.cursor = isDrawPanelOpen ? 'crosshair' : 'grab';
+        if (!container.classList.contains('leaflet-container')) {
+          container.classList.add('leaflet-container');
+        }
+      }
+      mapInstanceRef.current.invalidateSize();
+      const t1 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 60);
+      const t2 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 200);
+      const t3 = setTimeout(() => { if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize(); }, 350);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+  }, [isDrawPanelOpen]); // 'steel_40t' | 'steel_25mm' | 'anti_skid' | 'pedestrian'
   const drawingLayerRef = useRef(null);
 
   // ── CAD Versioning & Watermarking State ──
@@ -620,10 +751,12 @@ const DwgMapOverlay = ({
     }
   }, [autoStartDirectDrawing, isMapActive, handleStartDirectDrawing]);
 
-  // Auto-center map whenever anchor coordinates change (e.g., road name selected in Stage 1)
+  // Auto-center map only initially on anchor coordinates
+  const initialAnchorCenteredRef = useRef(false);
   useEffect(() => {
-    if (mapInstanceRef.current && anchorLat && anchorLng) {
-      mapInstanceRef.current.setView([anchorLat, anchorLng], 18, { animate: true });
+    if (!initialAnchorCenteredRef.current && mapInstanceRef.current && anchorLat && anchorLng) {
+      initialAnchorCenteredRef.current = true;
+      mapInstanceRef.current.setView([anchorLat, anchorLng], 18, { animate: false });
     }
   }, [anchorLat, anchorLng]);
 
@@ -637,6 +770,18 @@ const DwgMapOverlay = ({
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
     }
   }, [showKeymapSidebar]);
+
+  // Continuous ResizeObserver to prevent any black screen / unrendered areas on map container resize
+  useEffect(() => {
+    if (!mapContainerRef.current || !mapInstanceRef.current) return;
+    const ro = new ResizeObserver(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    });
+    ro.observe(mapContainerRef.current);
+    return () => ro.disconnect();
+  }, [mapReady]);
 
   // Initialize history stack when DWG data arrives
   useEffect(() => {
@@ -677,39 +822,113 @@ const DwgMapOverlay = ({
     }
   }, [historyIndex, historyStack]);
 
-  // ── Multi-Layer Interactive Map Click Listener ──
+  // ── Persistent Refs for Stale-Closure Free Canvas Click Handling ──
+  const activeDrawingLayerRef = useRef(activeDrawingLayer);
+  const isMultiLayerDrawingModeRef = useRef(isMultiLayerDrawingMode);
+  const selectedBarrierTypeRef = useRef(selectedBarrierType);
+  const selectedPlateTypeRef = useRef(selectedPlateType);
+  const newLabelTextRef = useRef(newLabelText);
+  const anchorLatRef = useRef(anchorLat);
+  const anchorLngRef = useRef(anchorLng);
+  const isArRef = useRef(isAr);
+
+  useEffect(() => { activeDrawingLayerRef.current = activeDrawingLayer; }, [activeDrawingLayer]);
+  useEffect(() => { isMultiLayerDrawingModeRef.current = isMultiLayerDrawingMode; }, [isMultiLayerDrawingMode]);
+  useEffect(() => { selectedBarrierTypeRef.current = selectedBarrierType; }, [selectedBarrierType]);
+  useEffect(() => { selectedPlateTypeRef.current = selectedPlateType; }, [selectedPlateType]);
+  useEffect(() => { newLabelTextRef.current = newLabelText; }, [newLabelText]);
+  useEffect(() => { anchorLatRef.current = anchorLat; }, [anchorLat]);
+  useEffect(() => { anchorLngRef.current = anchorLng; }, [anchorLng]);
+  useEffect(() => { isArRef.current = isAr; }, [isAr]);
+
+  // References to track stage switching without re-triggering during drawing
+  const prevPhaseActiveRef = useRef(isPhaseActive);
+
+  // ONLY snap to location when switching between stages and returning to the map!
   useEffect(() => {
-    if (!mapInstanceRef.current || !window.L) return;
+    const justReturnedToStage = isPhaseActive && !prevPhaseActiveRef.current;
+    prevPhaseActiveRef.current = isPhaseActive;
+
+    if (justReturnedToStage && mapInstanceRef.current && window.L) {
+      setTimeout(() => {
+        if (!mapInstanceRef.current) return;
+        mapInstanceRef.current.invalidateSize();
+
+        // Snap to location of drawn zone
+        const all = [
+          ...drawnSiteNodes,
+          ...drawnTransitionNodes,
+          ...drawnBarrierNodes,
+          ...drawnPedestrianNodes,
+          ...drawnPlateNodes,
+          ...savedDetours.flatMap(d => d.nodes || []),
+          ...savedBarriers.flatMap(b => b.nodes || []),
+          ...savedPedestrians.flatMap(p => p.nodes || []),
+          ...savedPlates.flatMap(p => p.nodes || [])
+        ];
+        if (all.length > 0) {
+          const lats = all.map(n => n.lat);
+          const lngs = all.map(n => n.lng);
+          const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+          const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+          if (minLat === maxLat && minLng === maxLng) {
+            mapInstanceRef.current.setView([minLat, minLng], 18, { animate: false });
+          } else {
+            const bounds = window.L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
+            if (bounds.isValid()) {
+              mapInstanceRef.current.fitBounds(bounds.pad(0.2), { maxZoom: 18, animate: false });
+            }
+          }
+        }
+      }, 150);
+    }
+  }, [isPhaseActive]);
+
+  // ── Multi-Layer Interactive Map Click Listener (Instant First-Click Active) ──
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.L || !mapReady) return;
     const map = mapInstanceRef.current;
 
     const handleCanvasClick = (e) => {
-      if (!isMultiLayerDrawingMode) return;
+      // ONLY place nodes when the Draw Panel is OPEN and actively selected!
+      if (!isDrawPanelOpenRef.current) return;
       const { lat, lng } = e.latlng;
-      const utmX = Math.round(582500 + (lng - anchorLng) * 100000);
-      const utmN = Math.round(2703800 + (lat - anchorLat) * 110000);
+      const curAnchorLat = anchorLatRef.current || 24.4686;
+      const curAnchorLng = anchorLngRef.current || 39.6120;
+      const utmX = Math.round(582500 + (lng - curAnchorLng) * 100000);
+      const utmN = Math.round(2703800 + (lat - curAnchorLat) * 110000);
 
-      if (activeDrawingLayer === 'site') {
+      const curLayer = activeDrawingLayerRef.current;
+
+      if (curLayer === 'site') {
         setDrawnSiteNodes(prev => {
           const nextIdx = prev.length + 1;
           return [...prev, { id: `S${nextIdx}`, lat, lng, x: utmX, y: utmN }];
         });
-      } else if (activeDrawingLayer === 'transition') {
+      } else if (curLayer === 'transition') {
         setDrawnTransitionNodes(prev => {
           const nextIdx = prev.length + 1;
           return [...prev, { id: `T${nextIdx}`, lat, lng, x: utmX, y: utmN }];
         });
-      } else if (activeDrawingLayer === 'barrier') {
+      } else if (curLayer === 'barrier') {
         setDrawnBarrierNodes(prev => {
           const nextIdx = prev.length + 1;
           return [...prev, { id: `B${nextIdx}`, lat, lng, x: utmX, y: utmN }];
         });
-      } else if (activeDrawingLayer === 'pedestrian') {
+      } else if (curLayer === 'pedestrian') {
         setDrawnPedestrianNodes(prev => {
           const nextIdx = prev.length + 1;
           return [...prev, { id: `P${nextIdx}`, lat, lng, x: utmX, y: utmN }];
         });
-      } else if (activeDrawingLayer === 'labels') {
-        const textToPlace = (newLabelText || '').trim() || (isAr ? `تسمية ${customTextLabels.length + 1}` : `Label ${customTextLabels.length + 1}`);
+      } else if (curLayer === 'plates') {
+        // Collect up to 4 corner nodes, then allow user to drag/adjust before confirming
+        setDrawnPlateNodes(prev => {
+          if (prev.length >= 4) return prev;
+          const nextIdx = prev.length + 1;
+          return [...prev, { id: `PL${nextIdx}`, lat, lng, x: utmX, y: utmN }];
+        });
+      } else if (curLayer === 'labels') {
+        const textToPlace = (newLabelTextRef.current || '').trim() || (isArRef.current ? 'تسمية' : 'Label');
         setCustomTextLabels(prev => [
           ...prev, 
           { 
@@ -723,13 +942,157 @@ const DwgMapOverlay = ({
           }
         ]);
       }
+
+// Map stays completely stable under cursor while placing nodes
     };
 
     map.on('click', handleCanvasClick);
     return () => {
       map.off('click', handleCanvasClick);
     };
-  }, [isMultiLayerDrawingMode, activeDrawingLayer, newLabelText, customTextLabels.length, anchorLat, anchorLng, isAr]);
+  }, [mapReady]);
+
+  // ── Auto-Extraction Sync to Stage 2.2 and Stage 3 ──
+  useEffect(() => {
+    if (!onMapFeaturesExtracted) return;
+
+    const allBarriers = [
+      ...savedBarriers,
+      ...(drawnBarrierNodes.length >= 2 ? [{
+        id: 'active_barrier',
+        type: selectedBarrierType,
+        name: isAr ? 'حاجز قيد الرسم' : 'Active Drawing Barrier',
+        nodes: drawnBarrierNodes,
+        lengthM: calculateRealPolylineLengthMeters(drawnBarrierNodes),
+        clearanceM: selectedBarrierType.includes('concrete') ? 0.8 : 2.5
+      }] : [])
+    ];
+
+    const allDetours = [
+      ...savedDetours,
+      ...(drawnTransitionNodes.length >= 2 ? [{
+        id: 'active_detour',
+        name: isAr ? 'مسار تحويلة قيد الرسم' : 'Active Detour',
+        nodes: drawnTransitionNodes,
+        lengthM: calculateRealPolylineLengthMeters(drawnTransitionNodes)
+      }] : [])
+    ];
+
+    const allPedestrians = [
+      ...savedPedestrians,
+      ...(drawnPedestrianNodes.length >= 2 ? [{
+        id: 'active_ped',
+        name: isAr ? 'ممر مشاة قيد الرسم' : 'Active Pedestrian Path',
+        nodes: drawnPedestrianNodes,
+        lengthM: calculateRealPolylineLengthMeters(drawnPedestrianNodes)
+      }] : [])
+    ];
+
+    const activePlateDims = drawnPlateNodes.length === 4 ? calculateRealPlateDimensions(drawnPlateNodes) : null;
+    const allPlates = [
+      ...savedPlates,
+      ...(drawnPlateNodes.length === 4 ? [{
+        id: 'active_plate',
+        type: selectedPlateType,
+        nodes: drawnPlateNodes,
+        widthM: activePlateDims ? activePlateDims.widthM : 1.8,
+        lengthM: activePlateDims ? activePlateDims.lengthM : 3.0,
+        areaM2: activePlateDims ? activePlateDims.areaM2 : 5.4,
+        thicknessMm: selectedPlateType === 'steel_40t' ? 30 : 25
+      }] : [])
+    ];
+
+    const taperLen = allDetours.length > 0 ? allDetours[0].lengthM : (drawnTransitionNodes.length >= 2 ? calculateRealPolylineLengthMeters(drawnTransitionNodes) : 0);
+    const siteMetrics = calculateRealPolygonMetrics(drawnSiteNodes);
+
+    onMapFeaturesExtracted({
+      barriers: allBarriers,
+      detours: allDetours,
+      pedestrians: allPedestrians,
+      plates: allPlates,
+      siteNodes: drawnSiteNodes,
+      taperLengthM: taperLen,
+      laneWidthM: 3.6,
+      siteMetrics
+    });
+  }, [
+    savedBarriers, drawnBarrierNodes,
+    savedDetours, drawnTransitionNodes,
+    savedPedestrians, drawnPedestrianNodes,
+    savedPlates, drawnPlateNodes,
+    drawnSiteNodes, selectedBarrierType
+  ]);
+
+  const handleSaveAndAddAnotherDetour = () => {
+    if (drawnTransitionNodes.length < 2) return;
+    const lenM = calculateRealPolylineLengthMeters(drawnTransitionNodes);
+    const newD = {
+      id: `detour_${Date.now()}`,
+      name: isAr ? `مسار تحويلة ${savedDetours.length + 1}` : `Detour Corridor #${savedDetours.length + 1}`,
+      nodes: [...drawnTransitionNodes],
+      lengthM: lenM
+    };
+    setSavedDetours(prev => [...prev, newD]);
+    setDrawnTransitionNodes([]);
+  };
+
+  const handleSaveAndAddAnotherBarrier = () => {
+    if (drawnBarrierNodes.length < 2) return;
+    const lenM = calculateRealPolylineLengthMeters(drawnBarrierNodes);
+    const isConc = selectedBarrierType.includes('concrete');
+    const newB = {
+      id: `barrier_${Date.now()}`,
+      type: selectedBarrierType,
+      name: isAr ? (isConc ? `جدار خرساني مسلّح ${savedBarriers.length + 1}` : `حاجز بلاستيكي ${savedBarriers.length + 1}`) : `Barrier #${savedBarriers.length + 1}`,
+      nodes: [...drawnBarrierNodes],
+      lengthM: lenM,
+      clearanceM: isConc ? 0.8 : 2.5
+    };
+    setSavedBarriers(prev => [...prev, newB]);
+    setDrawnBarrierNodes([]);
+  };
+
+  // Confirm & Save 4-Node Steel Trench Plate with Real Coordinates
+  const handleConfirmAndSavePlate = () => {
+    if (drawnPlateNodes.length !== 4) return;
+    const { widthM, lengthM, areaM2 } = calculateRealPlateDimensions(drawnPlateNodes);
+
+    const plateTypeMeta = {
+      steel_40t: { ar: 'لوح صلب ٤٠ طن (سمك ٣٠ ملم)', en: 'Heavy Steel Plate 40T (30mm)', thick: 30 },
+      steel_25mm: { ar: 'لوح صلب ٢٠ طن (سمك ٢٥ ملم)', en: 'Steel Plate 20T (25mm)', thick: 25 },
+      anti_skid: { ar: 'لوح منقوش مانع للانزلاق (سمك ٢٥ ملم)', en: 'Anti-Skid Plate (25mm)', thick: 25 },
+      pedestrian: { ar: 'جسر مشاة حديدي مع درابزين (سمك ١٥ ملم)', en: 'Pedestrian Iron Bridge (15mm)', thick: 15 }
+    };
+    const meta = plateTypeMeta[selectedPlateType] || plateTypeMeta.steel_40t;
+
+    const newPlate = {
+      id: `plate_${Date.now()}`,
+      type: selectedPlateType,
+      name: isAr ? `${meta.ar} #${savedPlates.length + 1}` : `${meta.en} #${savedPlates.length + 1}`,
+      nodes: [...drawnPlateNodes],
+      widthM,
+      lengthM,
+      areaM2,
+      thicknessMm: meta.thick,
+      color: '#a855f7'
+    };
+
+    setSavedPlates(prev => [...prev, newPlate]);
+    setDrawnPlateNodes([]);
+  };
+
+  const handleSaveAndAddAnotherPedestrian = () => {
+    if (drawnPedestrianNodes.length < 2) return;
+    const lenM = calculateRealPolylineLengthMeters(drawnPedestrianNodes);
+    const newP = {
+      id: `ped_${Date.now()}`,
+      name: isAr ? `ممر مشاة آمن ${savedPedestrians.length + 1}` : `Pedestrian Path #${savedPedestrians.length + 1}`,
+      nodes: [...drawnPedestrianNodes],
+      lengthM: lenM
+    };
+    setSavedPedestrians(prev => [...prev, newP]);
+    setDrawnPedestrianNodes([]);
+  };
 
   // ── Render Multi-Layer Drawing (Yellow Site, Red Detour, Cyan Barrier, Green Pedestrian, Custom Labels) ──
   useEffect(() => {
@@ -740,7 +1103,7 @@ const DwgMapOverlay = ({
       drawingLayerRef.current = null;
     }
 
-    const hasAnyDrawn = drawnSiteNodes.length > 0 || drawnTransitionNodes.length > 0 || drawnBarrierNodes.length > 0 || drawnPedestrianNodes.length > 0 || customTextLabels.length > 0;
+    const hasAnyDrawn = drawnSiteNodes.length > 0 || drawnTransitionNodes.length > 0 || drawnBarrierNodes.length > 0 || drawnPedestrianNodes.length > 0 || drawnPlateNodes.length > 0 || customTextLabels.length > 0 || savedBarriers.length > 0 || savedDetours.length > 0 || savedPedestrians.length > 0 || savedPlates.length > 0;
     if (!isMultiLayerDrawingMode && !hasAnyDrawn) return;
 
     const lg = window.L.layerGroup().addTo(mapInstanceRef.current);
@@ -816,8 +1179,19 @@ const DwgMapOverlay = ({
       });
     };
 
+    // ── Focused Layer Detection for Grabable Nodes ──
+    // Grabable node handles are ONLY visible when the draw panel is active AND for the specific layer focused
+    const isSiteFocused = isDrawPanelOpen && activeDrawingLayer === 'site';
+    const isTransitionFocused = isDrawPanelOpen && activeDrawingLayer === 'transition';
+    const isBarrierFocused = isDrawPanelOpen && activeDrawingLayer === 'barrier';
+    const isPedestrianFocused = isDrawPanelOpen && activeDrawingLayer === 'pedestrian';
+    const isPlatesFocused = isDrawPanelOpen && activeDrawingLayer === 'plates';
+    const isLabelsFocused = isDrawPanelOpen && activeDrawingLayer === 'labels';
+
     // 1. Render Site Nodes (Yellow Polygon - ONE clean polygon)
-    renderNodeMarkers(drawnSiteNodes, setDrawnSiteNodes, '#f59e0b', '#fef08a', isAr ? 'نقطة الموقع' : 'Site Node');
+    if (isSiteFocused && drawnSiteNodes.length > 0) {
+      renderNodeMarkers(drawnSiteNodes, setDrawnSiteNodes, '#f59e0b', '#fef08a', isAr ? 'نقطة الموقع' : 'Site Node');
+    }
     if (drawnSiteNodes.length >= 3) {
       window.L.polygon(drawnSiteNodes.map(n => [n.lat, n.lng]), {
         color: '#f59e0b',
@@ -835,7 +1209,9 @@ const DwgMapOverlay = ({
     }
 
     // 2. Render Transition Nodes (Red Polyline)
-    renderNodeMarkers(drawnTransitionNodes, setDrawnTransitionNodes, '#ef4444', '#fecaca', isAr ? 'نقطة التحويلة' : 'Detour Node');
+    if (isTransitionFocused && drawnTransitionNodes.length > 0) {
+      renderNodeMarkers(drawnTransitionNodes, setDrawnTransitionNodes, '#ef4444', '#fecaca', isAr ? 'نقطة التحويلة' : 'Detour Node');
+    }
     if (drawnTransitionNodes.length >= 2) {
       window.L.polyline(drawnTransitionNodes.map(n => [n.lat, n.lng]), {
         color: '#ef4444',
@@ -845,7 +1221,9 @@ const DwgMapOverlay = ({
     }
 
     // 3. Render Barrier Wall Nodes (Cyan / Slate Polyline with repeating pattern)
-    renderNodeMarkers(drawnBarrierNodes, setDrawnBarrierNodes, '#06b6d4', '#cffafe', isAr ? 'نقطة جدار الحواجز' : 'Barrier Node');
+    if (isBarrierFocused && drawnBarrierNodes.length > 0) {
+      renderNodeMarkers(drawnBarrierNodes, setDrawnBarrierNodes, '#06b6d4', '#cffafe', isAr ? 'نقطة جدار الحواجز' : 'Barrier Node');
+    }
     if (drawnBarrierNodes.length >= 2) {
       window.L.polyline(drawnBarrierNodes.map(n => [n.lat, n.lng]), {
         color: '#06b6d4',
@@ -855,13 +1233,129 @@ const DwgMapOverlay = ({
     }
 
     // 4. Render Pedestrian Nodes (Green Polyline - Optional)
-    renderNodeMarkers(drawnPedestrianNodes, setDrawnPedestrianNodes, '#10b981', '#a7f3d0', isAr ? 'نقطة المشاة' : 'Pedestrian Node');
+    if (isPedestrianFocused && drawnPedestrianNodes.length > 0) {
+      renderNodeMarkers(drawnPedestrianNodes, setDrawnPedestrianNodes, '#10b981', '#a7f3d0', isAr ? 'نقطة المشاة' : 'Pedestrian Node');
+    }
     if (drawnPedestrianNodes.length >= 2) {
       window.L.polyline(drawnPedestrianNodes.map(n => [n.lat, n.lng]), {
         color: '#10b981',
         weight: 2.8,
         dashArray: '4, 4'
       }).addTo(lg);
+    }
+
+    // 2b. Render Saved Multiple Detours (Red Polyline series)
+    savedDetours.forEach((detour, dIdx) => {
+      if (detour.nodes && detour.nodes.length >= 2) {
+        const poly = window.L.polyline(detour.nodes.map(n => [n.lat, n.lng]), {
+          color: '#ef4444',
+          weight: 4,
+          dashArray: '6, 4'
+        }).addTo(lg);
+        poly.bindTooltip(`<b style="color:#ef4444">🚗 ${detour.name}</b><br/>${isAr ? `الطول: ${detour.lengthM}م` : `Length: ${detour.lengthM}m`}`, { permanent: false });
+      }
+    });
+
+    // 3b. Render Saved Multiple Barriers (Cyan Polyline series)
+    savedBarriers.forEach((barrier, bIdx) => {
+      if (barrier.nodes && barrier.nodes.length >= 2) {
+        const poly = window.L.polyline(barrier.nodes.map(n => [n.lat, n.lng]), {
+          color: '#06b6d4',
+          weight: 4.5,
+          dashArray: '8, 4'
+        }).addTo(lg);
+        poly.bindTooltip(`<b style="color:#06b6d4">🧱 ${barrier.name || 'حاجز سلامة'}</b><br/>${isAr ? `النوع: ${barrier.type} | الطول: ${barrier.lengthM}م` : `Type: ${barrier.type} | Length: ${barrier.lengthM}m`}`, { permanent: false });
+      }
+    });
+
+    // 4b. Render Saved Multiple Pedestrian Corridors (Green Polyline series)
+    savedPedestrians.forEach((ped, pIdx) => {
+      if (ped.nodes && ped.nodes.length >= 2) {
+        const poly = window.L.polyline(ped.nodes.map(n => [n.lat, n.lng]), {
+          color: '#10b981',
+          weight: 3.5,
+          dashArray: '4, 4'
+        }).addTo(lg);
+        poly.bindTooltip(`<b style="color:#10b981">🚶 ${ped.name}</b><br/>${isAr ? `الطول: ${ped.lengthM}م` : `Length: ${ped.lengthM}m`}`, { permanent: false });
+      }
+    });
+
+    // 4c. Render Saved Multiple Trench Steel Plates (Purple 4-Node Polygons)
+    savedPlates.forEach((plate, plIdx) => {
+      if (plate.nodes && plate.nodes.length === 4) {
+        const poly = window.L.polygon(plate.nodes.map(n => [n.lat, n.lng]), {
+          color: '#a855f7',
+          weight: 3,
+          fillColor: '#a855f7',
+          fillOpacity: 0.38,
+          dashArray: '3, 3'
+        }).addTo(lg);
+        poly.bindTooltip(
+          `<b style="color:#c084fc">🟣 ${plate.name}</b><br/>${isAr ? `المواصفة: صلب ٤٠ طن (سمك ٣٠ ملم)<br/>الأبعاد: ${plate.lengthM}م × ${plate.widthM}م` : `Spec: 40T Steel (30mm thickness)<br/>Dim: ${plate.lengthM}m x ${plate.widthM}m`}`,
+          { permanent: false }
+        );
+
+        // Corner pins are ONLY rendered when Plates layer is focused!
+        if (isPlatesFocused) {
+          plate.nodes.forEach((node, nodeIdx) => {
+            const cornerMk = window.L.marker([node.lat, node.lng], {
+              pane: 'cadMarkerPane',
+              icon: window.L.divIcon({
+                className: 'plate-corner-node-marker',
+                html: `<div style="background:#a855f7;color:white;border:1.5px solid #f3e8ff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:9px;box-shadow:0 2px 6px rgba(0,0,0,0.6);">${node.id || `PL${nodeIdx+1}`}</div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+              })
+            });
+            cornerMk.bindPopup(`
+              <div style="font-family:system-ui;font-size:11px;direction:${isAr?'rtl':'ltr'};text-align:center;">
+                <div style="font-weight:bold;color:#c084fc;margin-bottom:4px;">🟣 ${plate.name}</div>
+                <button id="del-plate-${plate.id}" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-weight:bold;cursor:pointer;width:100%;">
+                  🗑️ ${isAr ? 'حذف هذا اللوح' : 'Delete Plate'}
+                </button>
+              </div>
+            `);
+            cornerMk.on('popupopen', () => {
+              const btn = document.getElementById(`del-plate-${plate.id}`);
+              if (btn) {
+                btn.onclick = (e) => {
+                  e.stopPropagation();
+                  setSavedPlates(prev => prev.filter(p => p.id !== plate.id));
+                  if (mapInstanceRef.current) mapInstanceRef.current.closePopup();
+                };
+              }
+            });
+            cornerMk.addTo(lg);
+          });
+        }
+      }
+    });
+
+    // 4d. Render Active In-Progress Plate Nodes (Purple 1-4 nodes with draggable corner adjustments)
+    if (drawnPlateNodes.length > 0) {
+      if (isPlatesFocused) {
+        renderNodeMarkers(drawnPlateNodes, setDrawnPlateNodes, '#a855f7', '#f3e8ff', isAr ? 'ركن اللوح' : 'Plate Corner');
+      }
+      if (drawnPlateNodes.length === 4) {
+        const activePlatePoly = window.L.polygon(drawnPlateNodes.map(n => [n.lat, n.lng]), {
+          color: '#a855f7',
+          weight: 3.5,
+          fillColor: '#a855f7',
+          fillOpacity: 0.38
+        }).addTo(lg);
+        activePlatePoly.bindTooltip(
+          isAr
+            ? '<b style="color:#c084fc">🟣 لوح قيد التعديل (٤ أركان)</b><br/>اسحب أي ركن على الخريطة لتعديل الموضع، ثم اضغط على زر اعتماد اللوح في القائمة.'
+            : '<b style="color:#c084fc">🟣 In-Progress Plate (4 Corners)</b><br/>Drag any corner on map to adjust, then click Confirm & Save.',
+          { permanent: false }
+        );
+      } else if (drawnPlateNodes.length >= 2) {
+        window.L.polyline(drawnPlateNodes.map(n => [n.lat, n.lng]), {
+          color: '#a855f7',
+          weight: 2.5,
+          dashArray: '3, 3'
+        }).addTo(lg);
+      }
     }
 
     // 5. Render Custom Text Labels (Cyan / Gold Callouts)
@@ -890,7 +1384,7 @@ const DwgMapOverlay = ({
       });
 
       const labelMarker = window.L.marker([lbl.lat, lbl.lng], {
-        draggable: true,
+        draggable: isLabelsFocused,
         pane: 'cadMarkerPane',
         icon: labelIcon
       });
@@ -935,7 +1429,7 @@ const DwgMapOverlay = ({
 
       labelMarker.addTo(lg);
     });
-  }, [isMultiLayerDrawingMode, drawnSiteNodes, drawnTransitionNodes, drawnBarrierNodes, drawnPedestrianNodes, customTextLabels, anchorLat, anchorLng, isAr]);
+  }, [isMultiLayerDrawingMode, isDrawPanelOpen, activeDrawingLayer, drawnSiteNodes, drawnTransitionNodes, drawnBarrierNodes, drawnPedestrianNodes, drawnPlateNodes, savedDetours, savedBarriers, savedPedestrians, savedPlates, customTextLabels, anchorLat, anchorLng, isAr]);
 
   // Undo / Revert Last Placed Point on Active Drawing Layer
   const handleUndoLastPoint = () => {
@@ -3126,8 +3620,30 @@ const DwgMapOverlay = ({
           ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
             {/* ── MAP VIEWPORT (8 of 12 cols when sidebar open, 12 of 12 when collapsed) ── */}
-            <div className={`${showKeymapSidebar ? 'lg:col-span-8' : 'lg:col-span-12'} relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-950 transition-all duration-300`} style={{ minHeight: '640px' }}>
-              <div ref={mapContainerRef} className="absolute inset-0 z-0" />
+            <div className={`${showKeymapSidebar ? 'lg:col-span-8' : 'lg:col-span-12'} relative rounded-2xl overflow-hidden border border-slate-300 shadow-xl bg-slate-900`} style={{ minHeight: '640px', height: '640px' }}>
+              <div
+                ref={mapContainerRef}
+                className="absolute inset-0 z-0 leaflet-container w-full h-full"
+                style={{ cursor: isDrawPanelOpen ? 'crosshair' : 'grab', backgroundColor: '#0f172a' }}
+              />
+
+              {/* Floating Active Drawing Mode Banner */}
+              {isDrawPanelOpen && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-slate-950/95 backdrop-blur-md border border-amber-500/60 text-amber-300 px-4 py-1.5 rounded-xl shadow-xl flex items-center gap-3 text-xs font-bold animate-fade-in pointer-events-auto">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                  <span>{isAr ? 'لوحة الرسم نشطة ✏️ (انقر على الخريطة لوضع النقاط)' : 'Draw Panel Active ✏️ (Click map to place nodes)'}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowKeymapSidebar(false);
+                      setIsMultiLayerDrawingMode(false);
+                    }}
+                    className="ml-1 px-2.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-[11px] transition cursor-pointer border border-slate-700"
+                  >
+                    {isAr ? 'إغلاق لوحة الرسم ✕' : 'Close Panel ✕'}
+                  </button>
+                </div>
+              )}
 
               {/* Spatial Drag Handle Banner */}
               {!isLocked && !isMultiLayerDrawingMode && hasImportedCad && (
@@ -3159,16 +3675,23 @@ const DwgMapOverlay = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setSidebarTab('drawing');
-                    setIsMultiLayerDrawingMode(true);
-                    setShowKeymapSidebar(prev => (showKeymapSidebar && sidebarTab === 'drawing' ? false : true));
+                    const willOpen = !(showKeymapSidebar && sidebarTab === 'drawing');
+                    if (willOpen) {
+                      setSidebarTab('drawing');
+                      setShowKeymapSidebar(true);
+                      setIsMultiLayerDrawingMode(true);
+                      setActiveDrawingLayer('site');
+                    } else {
+                      setShowKeymapSidebar(false);
+                      setIsMultiLayerDrawingMode(false);
+                    }
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow-lg flex items-center gap-1.5 transition cursor-pointer ${
                     showKeymapSidebar && sidebarTab === 'drawing'
                       ? 'bg-amber-600 text-white border-amber-400 ring-2 ring-amber-400/40'
                       : 'bg-slate-950/90 hover:bg-slate-900 text-amber-300 border-amber-500/40'
                   }`}
-                  title={isAr ? 'أدوات الرسم الهندسي المتعدد وتحديد النطاق' : 'CAD Drawing Tools'}
+                  title={isAr ? 'فتح لوحة الرسم الهندسي لوضع النقاط' : 'Open Draw Panel to place nodes'}
                 >
                   <PenTool className="h-3.5 w-3.5 text-brand-gold" />
                   <span>{isAr ? 'أدوات الرسم ✏️' : 'CAD Drawing ✏️'}</span>
@@ -3292,14 +3815,17 @@ const DwgMapOverlay = ({
 
             {/* ── UNIFIED RIGHT SIDEBAR (KEYMAP / DRAWING / MOT SIGNS) ── */}
             {showKeymapSidebar && (
-              <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4 animate-fade-in min-h-[640px]">
+              <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white shadow-xl flex flex-col justify-between space-y-4 animate-fade-in min-h-[640px] max-h-[640px] overflow-y-auto custom-scrollbar">
                 <div className="space-y-3.5">
                   {/* Top Header: Tab Switchers & Collapse Button */}
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800 gap-2">
                     <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 flex-1">
                       <button
                         type="button"
-                        onClick={() => setSidebarTab('keymap')}
+                        onClick={() => {
+                          setSidebarTab('keymap');
+                          setIsMultiLayerDrawingMode(false);
+                        }}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                           sidebarTab === 'keymap'
                             ? 'bg-amber-600 text-white shadow-xs'
@@ -3328,7 +3854,10 @@ const DwgMapOverlay = ({
 
                       <button
                         type="button"
-                        onClick={() => setSidebarTab('signs')}
+                        onClick={() => {
+                          setSidebarTab('signs');
+                          setIsMultiLayerDrawingMode(false);
+                        }}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                           sidebarTab === 'signs'
                             ? 'bg-amber-600 text-white shadow-xs'
@@ -3342,9 +3871,12 @@ const DwgMapOverlay = ({
 
                     <button
                       type="button"
-                      onClick={() => setShowKeymapSidebar(false)}
+                      onClick={() => {
+                        setShowKeymapSidebar(false);
+                        setIsMultiLayerDrawingMode(false);
+                      }}
                       className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition cursor-pointer"
-                      title={isAr ? 'إخفاء اللوحة الجانبية' : 'Collapse Sidebar'}
+                      title={isAr ? 'إغلاق اللوحة الجانبية وإيقاف الرسم' : 'Close Sidebar & Stop Drawing'}
                     >
                       <ChevronRight className="h-4 w-4 rtl:rotate-180 text-slate-300" />
                     </button>
@@ -3454,7 +3986,7 @@ const DwgMapOverlay = ({
                           }`}
                         >
                           <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0"></span>
-                          <span className="truncate">{isAr ? `٢. التحويلة (${drawnTransitionNodes.length}) 🔴` : `2. Detour (${drawnTransitionNodes.length}) 🔴`}</span>
+                          <span className="truncate">{isAr ? `٢. التحويلة (${savedDetours.length + (drawnTransitionNodes.length ? 1 : 0)}) 🔴` : `2. Detour (${savedDetours.length + (drawnTransitionNodes.length ? 1 : 0)}) 🔴`}</span>
                         </button>
 
                         {/* 3. Barrier */}
@@ -3468,7 +4000,7 @@ const DwgMapOverlay = ({
                           }`}
                         >
                           <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0"></span>
-                          <span className="truncate">{isAr ? `٣. الحواجز (${drawnBarrierNodes.length}) 🧱` : `3. Barrier (${drawnBarrierNodes.length}) 🧱`}</span>
+                          <span className="truncate">{isAr ? `٣. الحواجز (${savedBarriers.length + (drawnBarrierNodes.length ? 1 : 0)}) 🧱` : `3. Barrier (${savedBarriers.length + (drawnBarrierNodes.length ? 1 : 0)}) 🧱`}</span>
                         </button>
 
                         {/* 4. Pedestrian */}
@@ -3482,21 +4014,35 @@ const DwgMapOverlay = ({
                           }`}
                         >
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
-                          <span className="truncate">{isAr ? `٤. المشاة (${drawnPedestrianNodes.length}) 🟢` : `4. Ped (${drawnPedestrianNodes.length}) 🟢`}</span>
+                          <span className="truncate">{isAr ? `٤. المشاة (${savedPedestrians.length + (drawnPedestrianNodes.length ? 1 : 0)}) 🟢` : `4. Ped (${savedPedestrians.length + (drawnPedestrianNodes.length ? 1 : 0)}) 🟢`}</span>
                         </button>
 
-                        {/* 5. Custom Text Labels */}
+                        {/* 5. Steel Trench Plates (Purple - 4 Nodes) */}
+                        <button
+                          type="button"
+                          onClick={() => setActiveDrawingLayer('plates')}
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            activeDrawingLayer === 'plates'
+                              ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-400/50'
+                              : 'text-purple-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"></span>
+                          <span className="truncate">{isAr ? `٥. ألواح التغطية (${savedPlates.length + (drawnPlateNodes.length ? 1 : 0)}) 🟣` : `5. Plates (${savedPlates.length + (drawnPlateNodes.length ? 1 : 0)}) 🟣`}</span>
+                        </button>
+
+                        {/* 6. Custom Text Labels */}
                         <button
                           type="button"
                           onClick={() => setActiveDrawingLayer('labels')}
-                          className={`col-span-2 p-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          className={`p-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                             activeDrawingLayer === 'labels'
                               ? 'bg-sky-500 text-slate-950 shadow-sm ring-2 ring-sky-400/50'
                               : 'text-sky-400 hover:bg-slate-800'
                           }`}
                         >
                           <Tag className="w-3.5 h-3.5 shrink-0" />
-                          <span>{isAr ? `٥. التسميات والنصوص التوضيحية (${customTextLabels.length}) 🏷️` : `5. Custom Text Labels (${customTextLabels.length}) 🏷️`}</span>
+                          <span className="truncate">{isAr ? `٦. التسميات (${customTextLabels.length}) 🏷️` : `6. Labels (${customTextLabels.length}) 🏷️`}</span>
                         </button>
                       </div>
 
@@ -3511,38 +4057,260 @@ const DwgMapOverlay = ({
                         )}
 
                         {activeDrawingLayer === 'transition' && (
-                          <p className="text-red-300 text-[11px] leading-relaxed">
-                            {isAr
-                              ? `🔴 انقر على الخريطة لرسم خط مسار التحويلة والتدرج (${drawnTransitionNodes.length} نقاط).`
-                              : `🔴 Click on map to trace transition taper line (${drawnTransitionNodes.length} pts placed).`}
-                          </p>
-                        )}
-
-                        {activeDrawingLayer === 'barrier' && (
-                          <div className="space-y-1.5">
-                            <span className="text-cyan-300 font-bold text-[11px] block">
-                              {isAr ? '🧱 نوع الجدار / السلسلة المتكررة:' : 'Barrier Wall / Signage Series Type:'}
-                            </span>
-                            <select
-                              value={selectedBarrierType}
-                              onChange={(e) => setSelectedBarrierType(e.target.value)}
-                              className="w-full bg-slate-950 text-cyan-300 border border-cyan-700/60 rounded-lg p-1.5 text-xs font-bold focus:outline-none"
-                            >
-                              <option value="concrete_njb">{isAr ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier Wall (2m)'}</option>
-                              <option value="plastic_njb">{isAr ? '🚧 حواجز بلاستيكية مائية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
-                              <option value="cones_series">{isAr ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
-                              <option value="warning_lights_chain">{isAr ? '💡 شريط إضاءة تحذيري متصل' : '💡 Warning Lights Chain'}</option>
-                            </select>
+                          <div className="space-y-2">
+                            <p className="text-red-300 text-[11px] leading-relaxed">
+                              {isAr
+                                ? `🔴 انقر على الخريطة لرسم خط مسار التحويلة والتدرج (${drawnTransitionNodes.length} نقاط قيد الرسم).`
+                                : `🔴 Click on map to trace transition taper line (${drawnTransitionNodes.length} pts in progress).`}
+                            </p>
+                            {drawnTransitionNodes.length >= 2 && (
+                              <div className="bg-red-950/40 border border-red-500/40 p-2 rounded-lg text-red-200 text-xs font-mono flex justify-between items-center">
+                                <span>{isAr ? 'الطول الحقيقي للمسار (من الإحداثيات):' : 'Real Coordinate Distance:'}</span>
+                                <span className="font-bold text-sm text-red-300">{calculateRealPolylineLengthMeters(drawnTransitionNodes)} م</span>
+                              </div>
+                            )}
+                            {drawnTransitionNodes.length >= 2 && (
+                              <button
+                                type="button"
+                                onClick={handleSaveAndAddAnotherDetour}
+                                className="w-full py-1.5 px-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <span>+</span>
+                                <span>{isAr ? 'حفظ هذا المسار وإضافة مسار تحويلة إضافي' : 'Save & Add Another Detour'}</span>
+                              </button>
+                            )}
+                            {savedDetours.length > 0 && (
+                              <div className="space-y-1 pt-1 border-t border-slate-800">
+                                <span className="text-[10px] text-slate-400 font-bold block">{isAr ? 'مسارات التحويلة المحفوظة:' : 'Saved Detour Routes:'}</span>
+                                {savedDetours.map((d, dIdx) => (
+                                  <div key={d.id} className="flex items-center justify-between bg-slate-950 p-1.5 rounded text-[11px] border border-red-900/50">
+                                    <span className="text-red-300 font-mono">🚗 {d.name} ({d.lengthM}م)</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSavedDetours(prev => prev.filter((_, i) => i !== dIdx))}
+                                      className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
 
+                        {activeDrawingLayer === 'barrier' && (() => {
+                          const barrierEval = evaluateMotBarrierRule(
+                            { type: selectedBarrierType || 'concrete_njb', clearanceM: (selectedBarrierType && selectedBarrierType.includes('concrete')) ? 0.8 : 2.5 },
+                            workDurationHours || 0,
+                            excavationDepth || 0,
+                            speedLimit || 50
+                          ) || { isCompliant: true, reasonAr: '', reasonEn: '' };
+                          return (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-cyan-300 font-bold text-[11px] block">
+                                  {isAr ? '🧱 نوع الجدار / السلسلة المتكررة:' : 'Barrier Wall / Signage Series Type:'}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border ${
+                                  barrierEval.isCompliant 
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                                    : 'bg-red-500/20 text-red-300 border-red-500/40'
+                                }`}>
+                                  {barrierEval.isCompliant ? (isAr ? '✓ مطابق لكود الطرق ٣٠٥' : '✓ MOT 305') : (isAr ? '⚠️ مخالف لكود ٣٠٥' : '⚠️ NON-COMPLIANT')}
+                                </span>
+                              </div>
+
+                              <select
+                                value={selectedBarrierType}
+                                onChange={(e) => setSelectedBarrierType(e.target.value)}
+                                className="w-full bg-slate-950 text-cyan-300 border border-cyan-700/60 rounded-lg p-1.5 text-xs font-bold focus:outline-none"
+                              >
+                                <option value="concrete_njb">{isAr ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier Wall (2m)'}</option>
+                                <option value="plastic_njb">{isAr ? '🚧 حواجز بلاستيكية مائية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
+                                <option value="cones_series">{isAr ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
+                                <option value="warning_lights_chain">{isAr ? '💡 شريط إضاءة تحذيري متصل' : '💡 Warning Lights Chain'}</option>
+                              </select>
+
+                              {/* Live Evaluation Note */}
+                              <div className={`p-2 rounded text-[10px] leading-relaxed border ${
+                                barrierEval.isCompliant ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300' : 'bg-red-950/50 border-red-800/50 text-red-200'
+                              }`}>
+                                <span className="font-bold">{isAr ? (barrierEval.isCompliant ? '🛡️ المعيار الفني: ' : '⚠️ تنبيه كود ٣٠٥: ') : 'MOT Rule: '}</span>
+                                <span>{isAr ? barrierEval.reasonAr : barrierEval.reasonEn}</span>
+                              </div>
+
+                              {/* Save & Add Another Barrier */}
+                              {drawnBarrierNodes.length >= 2 && (
+                                <div className="bg-cyan-950/40 border border-cyan-500/40 p-2 rounded-lg text-cyan-200 text-xs font-mono flex justify-between items-center">
+                                  <span>{isAr ? 'الطول الحقيقي للجدار (من الإحداثيات):' : 'Real Coordinate Barrier Length:'}</span>
+                                  <span className="font-bold text-sm text-cyan-300">{calculateRealPolylineLengthMeters(drawnBarrierNodes)} م</span>
+                                </div>
+                              )}
+                              {drawnBarrierNodes.length >= 2 && (
+                                <button
+                                  type="button"
+                                  onClick={handleSaveAndAddAnotherBarrier}
+                                  className="w-full py-1.5 px-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded-lg text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+                                >
+                                  <span>+</span>
+                                  <span>{isAr ? 'حفظ هذا الحاجز وإضافة حاجز آخر' : 'Save & Add Another Barrier'}</span>
+                                </button>
+                              )}
+
+                              {savedBarriers.length > 0 && (
+                                <div className="space-y-1 pt-1 border-t border-slate-800">
+                                  <span className="text-[10px] text-slate-400 font-bold block">{isAr ? 'الحواجز المحفوظة على المخطط:' : 'Saved Barriers on Map:'}</span>
+                                  {savedBarriers.map((b, bIdx) => (
+                                    <div key={b.id} className="flex items-center justify-between bg-slate-950 p-1.5 rounded text-[11px] border border-cyan-900/50">
+                                      <span className="text-cyan-300 font-mono">🧱 {b.name} ({b.lengthM}م)</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSavedBarriers(prev => prev.filter((_, i) => i !== bIdx))}
+                                        className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         {activeDrawingLayer === 'pedestrian' && (
-                          <p className="text-emerald-300 text-[11px] leading-relaxed">
-                            {isAr
-                              ? `🟢 انقر على الخريطة لتحديد مسار ممر المشاة الآمن (اختياري - ${drawnPedestrianNodes.length} نقاط).`
-                              : `🟢 Click on map to draw safe pedestrian corridor (${drawnPedestrianNodes.length} pts placed).`}
-                          </p>
+                          <div className="space-y-2">
+                            <p className="text-emerald-300 text-[11px] leading-relaxed">
+                              {isAr
+                                ? `🟢 انقر على الخريطة لتحديد مسار ممر المشاة الآمن (${drawnPedestrianNodes.length} نقاط قيد الرسم).`
+                                : `🟢 Click on map to draw safe pedestrian corridor (${drawnPedestrianNodes.length} pts in progress).`}
+                            </p>
+                            {drawnPedestrianNodes.length >= 2 && (
+                              <div className="bg-emerald-950/40 border border-emerald-500/40 p-2 rounded-lg text-emerald-200 text-xs font-mono flex justify-between items-center">
+                                <span>{isAr ? 'طول ممر المشاة الحقيقي:' : 'Real Coordinate Pedestrian Length:'}</span>
+                                <span className="font-bold text-sm text-emerald-300">{calculateRealPolylineLengthMeters(drawnPedestrianNodes)} م</span>
+                              </div>
+                            )}
+                            {drawnPedestrianNodes.length >= 2 && (
+                              <button
+                                type="button"
+                                onClick={handleSaveAndAddAnotherPedestrian}
+                                className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-lg text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <span>+</span>
+                                <span>{isAr ? 'حفظ هذا الممر وإضافة ممر مشاة آخر' : 'Save & Add Another Pedestrian Corridor'}</span>
+                              </button>
+                            )}
+                            {savedPedestrians.length > 0 && (
+                              <div className="space-y-1 pt-1 border-t border-slate-800">
+                                <span className="text-[10px] text-slate-400 font-bold block">{isAr ? 'ممرات المشاة المحفوظة:' : 'Saved Pedestrian Corridors:'}</span>
+                                {savedPedestrians.map((p, pIdx) => (
+                                  <div key={p.id} className="flex items-center justify-between bg-slate-950 p-1.5 rounded text-[11px] border border-emerald-900/50">
+                                    <span className="text-emerald-300 font-mono">🚶 {p.name} ({p.lengthM}م)</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSavedPedestrians(prev => prev.filter((_, i) => i !== pIdx))}
+                                      className="text-red-400 hover:text-red-300 px-1 font-bold cursor-pointer"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         )}
+
+                        {/* Plates (Purple 4-Nodes Steel Trench Plates with Adjustment & Type Selection) */}
+                        {activeDrawingLayer === 'plates' && (() => {
+                          const dims = calculateRealPlateDimensions(drawnPlateNodes);
+                          const curW = dims.widthM;
+                          const curL = dims.lengthM;
+
+                          return (
+                            <div className="space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-purple-300 font-bold text-[11px] block">
+                                  {isAr ? '🟣 نوع ومواصفات لوح التغطية المعدني:' : 'Steel Trench Plate Type & Spec:'}
+                                </span>
+                                <span className="text-[10px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-600/50 px-2 py-0.5 rounded">
+                                  {drawnPlateNodes.length} / 4 {isAr ? 'أركان' : 'corners'}
+                                </span>
+                              </div>
+
+                              {/* Plate Type Selection Dropdown */}
+                              <select
+                                value={selectedPlateType}
+                                onChange={(e) => setSelectedPlateType(e.target.value)}
+                                className="w-full bg-slate-950 text-purple-300 border border-purple-700/60 rounded-lg p-2 text-xs font-bold focus:outline-none"
+                              >
+                                <option value="steel_40t">{isAr ? '🛡️ صلب ٤٠ طن (سماكة ٣٠ ملم - كود ٣٠٥ لخنادق المركبات)' : '🛡️ Heavy 40T Steel (30mm - SRC 305 Vehicle Trenches)'}</option>
+                                <option value="steel_25mm">{isAr ? '🚗 صلب ٢٠ طن (سماكة ٢٥ ملم - شوارع فرعية)' : '🚗 Secondary 20T Steel (25mm)'}</option>
+                                <option value="anti_skid">{isAr ? '👣 صلب منقوش مانع للانزلاق (مركبات ومشاة)' : '👣 Anti-Skid Diamond Steel Plate'}</option>
+                                <option value="pedestrian">{isAr ? '🚶 جسور مشاة حديدية مع درابزين حماية' : '🚶 Pedestrian Iron Bridge with Handrails'}</option>
+                              </select>
+
+                              {drawnPlateNodes.length < 4 ? (
+                                <p className="text-purple-200 text-[11px] leading-relaxed bg-purple-950/50 border border-purple-800/60 p-2 rounded-lg">
+                                  {isAr
+                                    ? `🟣 انقر على الخريطة لتحديد الركن رقم (${drawnPlateNodes.length + 1}) من ٤ أركان للوح الصلب. بعد وضع الأركان الأربعة يمكنك سحب أي ركن لتعديله.`
+                                    : `🟣 Click map to place corner (${drawnPlateNodes.length + 1}) of 4 for the steel plate. Once placed, you can drag any corner to adjust before confirming.`}
+                                </p>
+                              ) : (
+                                <div className="space-y-2 bg-purple-950/70 border border-purple-500/70 p-2.5 rounded-xl text-white text-xs">
+                                  <div className="flex items-center gap-1.5 text-purple-200 font-bold">
+                                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                                    <span>{isAr ? 'اكتملت أركان اللوح (يمكنك سحب أي ركن على الخريطة لضبطه)' : '4 Corners Placed (Drag any node on map to fine-tune)'}</span>
+                                  </div>
+                                  <div className="text-[11px] font-mono text-purple-300 bg-purple-900/40 p-1.5 rounded flex justify-between">
+                                    <span>{isAr ? `الأبعاد المحسوبة:` : 'Computed:'}</span>
+                                    <span>{curL}م {isAr ? 'طول' : 'L'} × {curW}م {isAr ? 'عرض' : 'W'}</span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={handleConfirmAndSavePlate}
+                                    className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>{isAr ? '✓ اعتماد وحفظ لوح التغطية هذا (+ إضافة لوح آخر)' : '✓ Confirm & Save This Plate (+ Add Another)'}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setDrawnPlateNodes([])}
+                                    className="w-full py-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                                  >
+                                    {isAr ? 'إلغاء أركان اللوح الحالي وإعادة الرسم' : 'Reset Plate Corners'}
+                                  </button>
+                                </div>
+                              )}
+
+                              {savedPlates.length > 0 && (
+                                <div className="space-y-1.5 pt-1.5 border-t border-slate-800">
+                                  <span className="text-[10px] text-slate-400 font-bold block">{isAr ? 'ألواح الصلب المعتمدة على الخريطة:' : 'Confirmed Plates on Map:'}</span>
+                                  {savedPlates.map((pl, plIdx) => (
+                                    <div key={pl.id} className="flex items-center justify-between bg-slate-950 p-2 rounded text-[11px] border border-purple-900/60 font-mono">
+                                      <div>
+                                        <span className="text-purple-300 font-bold block">🟣 {pl.name}</span>
+                                        <span className="text-[9.5px] text-slate-400">{pl.lengthM}م × {pl.widthM}م • سمك {pl.thicknessMm} ملم</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSavedPlates(prev => prev.filter((_, i) => i !== plIdx))}
+                                        className="text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-red-950 font-bold cursor-pointer text-xs"
+                                        title={isAr ? 'حذف اللوح' : 'Delete Plate'}
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {activeDrawingLayer === 'labels' && (
                           <div className="space-y-2">
@@ -3615,26 +4383,16 @@ const DwgMapOverlay = ({
                         </div>
                       </div>
 
-                      {/* Commit & Export Actions */}
+                      {/* Export CAD DXF Action (Commit CAD Removed per Specification) */}
                       <div className="space-y-2 pt-2 border-t border-slate-800">
                         <button
                           type="button"
-                          onClick={handleCommitMultiLayerFeatures}
-                          disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
-                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'توليد وحفظ الكاد ⚡' : 'Commit CAD ⚡'}</span>
-                        </button>
-
-                        <button
-                          type="button"
                           onClick={handleExportCadDxf}
-                          disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2}
-                          className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                          disabled={drawnSiteNodes.length < 3 && drawnTransitionNodes.length < 2 && savedDetours.length === 0 && savedBarriers.length === 0 && savedPlates.length === 0}
+                          className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md hover:shadow-blue-500/25 cursor-pointer"
                         >
-                          <DownloadCloud className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'تصدير كاد أوتوكاد DXF 💾' : 'Export CAD DXF 💾'}</span>
+                          <DownloadCloud className="w-4 h-4" />
+                          <span>{isAr ? 'تصدير مخطط أوتوكاد بصيغة (AutoCAD DXF 📐)' : 'Export CAD DXF Blueprint 📐'}</span>
                         </button>
                       </div>
                     </div>

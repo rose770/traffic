@@ -99,6 +99,7 @@ import {
   needsRoadMarkingRepaint,
   needsSiteFencing,
   LIFECYCLE_STAGES,
+  evaluateMotBarrierRule,
 } from './trafficStandards';
 
 // Traffic zone strategy texts with brand-specific colors
@@ -779,6 +780,18 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
   const [phasingAiSuccess, setPhasingAiSuccess] = useState(false);
   const [phasingAiError, setPhasingAiError] = useState('');
 
+  // Multiple Barrier Management State
+  const [showAddBarrierForm, setShowAddBarrierForm] = useState(false);
+  const [newBarrierInput, setNewBarrierInput] = useState({
+    type: 'concrete',
+    location: 'perimeter',
+    lengthM: 60,
+    clearanceM: 0.8,
+    labelAr: 'حواجز خرسانية مسلحة NJB',
+    labelEn: 'Concrete NJB Safety Barriers',
+    notes: 'عزل مسار حركة المرور وحماية موقع الأعمال'
+  });
+
   const handleGeneratePhasingWithAi = async () => {
     setIsGeneratingPhases(true);
     setPhasingAiError('');
@@ -1207,18 +1220,15 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
         setEquipmentList(extractedInfo.equipmentList);
       }
 
-      if (extractedInfo.latitude && extractedInfo.longitude) {
+      if (extractedInfo.boundaryPoints && Array.isArray(extractedInfo.boundaryPoints) && extractedInfo.boundaryPoints.length > 0) {
+        setBoundaryPoints(extractedInfo.boundaryPoints);
+      } else if (extractedInfo.latitude && extractedInfo.longitude) {
         const lat = Number(extractedInfo.latitude);
         const lng = Number(extractedInfo.longitude);
         const x = Math.round(582500 + (lng - 39.6120) * 100000);
         const y = Math.round(2703800 + (lat - 24.4686) * 110000);
-        setBoundaryPoints([{
-          lat,
-          lng,
-          x,
-          y,
-          id: Date.now()
-        }]);
+        const newPt = { lat, lng, x, y, id: Date.now() };
+        setBoundaryPoints(prev => (prev && prev.length > 0 ? [...prev, newPt] : [newPt]));
       }
     }
   };
@@ -1435,6 +1445,20 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     closedLanesCount: '',
     totalLanesCount: '',
     workDurationCategory: '', // long | medium | short | mobile_emergency
+    workDurationDays: 0,
+    workDurationHours: 0,
+    barriersList: [
+      {
+        id: 'barrier_1',
+        type: 'concrete',
+        labelAr: 'حواجز خرسانية مسلحة NJB (محيط الحفر ومسار السير)',
+        labelEn: 'Concrete NJB Safety Barriers (Excavation & Traffic Edge)',
+        location: 'perimeter',
+        lengthM: 60,
+        clearanceM: 0.8,
+        notes: 'حماية منطقة العمل وعزل حركة المرور وفق كود الطرق ٣٠٥'
+      }
+    ],
     diversionLengthM: '',
     pedestrianPathProvided: false,
     lightingPlanAr: '',
@@ -1486,11 +1510,11 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     vehicleEnd: '',
 
     // Traffic Safety Calculator states & Cross-Section
-    speedLimit: '',
-    closedLaneWidth: '',
+    speedLimit: '40',
+    closedLaneWidth: '3.6',
     proposedTaper: '',
-    proposedBuffer: '',
-    proposedTermination: '',
+    proposedBuffer: '50',
+    proposedTermination: '30',
     detourLanesPlacement: '',
     activeLanesCount: '',
     activeLanesLeftCount: '',
@@ -1962,15 +1986,16 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
   const getRequiredBarrier = () => {
     const start = new Date(formData.workStartDate);
     const end = new Date(formData.workEndDate);
-    const durationHours = Math.max(0, (end - start) / (1000 * 60 * 60));
+    const durationHours = formData.workDurationHours || Math.max(0, (end - start) / (1000 * 60 * 60));
     const depth = parseFloat(formData.excavationDepth) || 0;
+    const speed = parseFloat(formData.speedLimit) || 50;
 
-    if (durationHours > 72 || depth > 0.6) {
+    if (durationHours > 72 || depth > 0.6 || speed >= 80) {
       return {
         type: 'concrete', clearanceMin: 0.6, clearanceMax: 1.0,
-        labelAr: 'حواجز خرسانية', labelEn: 'Concrete Safety Barriers',
-        reasonAr: depth > 0.6 ? 'عمق الحفر يتجاوز ٠.٦ م' : 'مدة العمل تتجاوز ٧٢ ساعة',
-        reasonEn: depth > 0.6 ? 'Excavation depth exceeds 0.6m' : 'Work duration exceeds 72 hours'
+        labelAr: 'حواجز خرسانية مسلحة (NJB)', labelEn: 'Concrete Safety Barriers (NJB)',
+        reasonAr: depth > 0.6 ? 'عمق الحفر يتجاوز ٠.٦ م' : durationHours > 72 ? 'مدة العمل تتجاوز ٧٢ ساعة' : 'سرعة الطريق ٨٠+ كم/س تتطلب حواجز صلبة',
+        reasonEn: depth > 0.6 ? 'Excavation depth exceeds 0.6m' : durationHours > 72 ? 'Work duration exceeds 72 hours' : 'Design speed is 80+ km/h'
       };
     } else if (durationHours > 8 && depth <= 0.3) {
       return {
@@ -1982,9 +2007,9 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
     } else {
       return {
         type: 'cones', clearanceMin: 2.5, clearanceMax: 2.5,
-        labelAr: 'أقماع مرورية', labelEn: 'Traffic Cones',
-        reasonAr: 'مدة العمل أقل من ٨ ساعات',
-        reasonEn: 'Work duration under 8 hours'
+        labelAr: 'أقماع ومخاريط مرورية', labelEn: 'Traffic Cones Series',
+        reasonAr: 'أعمال نهارية مؤقتة تقل عن ٨ ساعات وبدون حفريات عميقة',
+        reasonEn: 'Short-term daylight work under 8 hours with no deep trench'
       };
     }
   };
@@ -2179,31 +2204,16 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
 
       map.on('click', e => {
         const { lat, lng } = e.latlng;
-        const pt = { lat, lng, x: Math.round(582500 + (lng - 39.6120) * 100000), y: Math.round(2703800 + (lat - 24.4686) * 110000) };
+        const pt = {
+          lat,
+          lng,
+          x: Math.round(582500 + (lng - 39.6120) * 100000),
+          y: Math.round(2703800 + (lat - 24.4686) * 110000),
+          id: Date.now() + Math.random()
+        };
 
-        if (nodesStateRef.current.b < 4) {
-          setBoundaryPoints(prev => [...prev, pt]);
-        } else if (nodesStateRef.current.d < 2) {
-          setDetourNodes(prev => {
-            const newNodes = [...prev, { lat, lng }];
-            if (newNodes.length === 1) {
-              setFormData(f => ({...f, vehicleStart: `Sta 0+000 (E${pt.x}, N${pt.y})`}));
-            } else if (newNodes.length === 2) {
-              setFormData(f => ({...f, vehicleEnd: `Sta 0+450 (E${pt.x}, N${pt.y})`}));
-            }
-            return newNodes;
-          });
-        } else if (nodesStateRef.current.p < 2) {
-          setPedestrianNodes(prev => {
-            const newNodes = [...prev, { lat, lng }];
-            if (newNodes.length === 1) {
-              setFormData(f => ({...f, pedestrianStart: `Sta 0+050 (E${pt.x}, N${pt.y})`}));
-            } else if (newNodes.length === 2) {
-              setFormData(f => ({...f, pedestrianEnd: `Sta 0+355 (E${pt.x}, N${pt.y})`}));
-            }
-            return newNodes;
-          });
-        }
+        // Support drawing multiple boundary points without restriction
+        setBoundaryPoints(prev => [...(prev || []), pt]);
       });
 
       // Two invalidate calls: one immediate and one after tiles settle
@@ -2218,19 +2228,20 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
 
   // Invalidate map size when panel is expanded (map container becomes visible)
   useEffect(() => {
-    if (expandedPanels.p1_map && phase1MapInstance.current) {
+    if (phase1MapInstance.current) {
       setTimeout(() => {
         if (phase1MapInstance.current) phase1MapInstance.current.invalidateSize();
       }, 150);
     }
-  }, [expandedPanels.p1_map]);
+  }, [expandedPanels.p1_general, currentPhase]);
 
   useEffect(() => {
     if (!phase1MapInstance.current || !phase1MarkersGroupRef.current || !window.L) return;
     phase1MarkersGroupRef.current.clearLayers();
 
-    const renderMk = (pts, color, prefix, labels, setFn) => pts.slice(0, (prefix==='C'?4:2)).forEach((p, i) => {
+    const renderMk = (pts, color, prefix, labels, setFn) => (pts || []).forEach((p, i) => {
       if (!p.lat || !p.lng) return;
+      const nodeLabel = (labels && labels[i]) ? labels[i] : `${prefix}${i+1}`;
       const mk = window.L.marker([p.lat, p.lng], {
         draggable: true,
         icon: window.L.divIcon({
@@ -2239,12 +2250,12 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
           iconSize: [prefix==='C'?26:28, prefix==='C'?26:28], iconAnchor: [prefix==='C'?13:14, prefix==='C'?13:14]
         })
       });
-      mk.bindTooltip(`<b style="color:${color}">${prefix}${i+1} — ${labels[i]}</b><br/><span style="font-family:monospace;font-size:10px">Lat: ${p.lat.toFixed(5)}<br/>Lng: ${p.lng.toFixed(5)}</span><br/><span style="color:#38bdf8;font-size:9px;font-weight:bold">انقر لضبط إحداثيات 6-DOF</span>`, { permanent: false });
+      mk.bindTooltip(`<b style="color:${color}">${prefix}${i+1} — ${nodeLabel}</b><br/><span style="font-family:monospace;font-size:10px">Lat: ${p.lat.toFixed(5)}<br/>Lng: ${p.lng.toFixed(5)}</span><br/><span style="color:#38bdf8;font-size:9px;font-weight:bold">انقر لضبط إحداثيات 6-DOF</span>`, { permanent: false });
       
       mk.on('click', () => {
         setSelected6DofNode({
           id: `${prefix}${i+1}`,
-          label: labels[i] || `${prefix}${i+1}`,
+          label: nodeLabel,
           layer: prefix === 'C' ? 'construction' : prefix === 'D' ? 'detour' : 'pedestrian',
           lat: p.lat,
           lng: p.lng,
@@ -2292,7 +2303,7 @@ const ConstructionPlanningInterface = ({ onNavigateToLogs }) => {
 
     // ── Blue filled polygon under construction zone nodes (renders from 2+ nodes) ──
     if (boundaryPoints.length >= 2) {
-      const polyCoords = boundaryPoints.slice(0, 4).filter(p => p.lat && p.lng).map(p => [p.lat, p.lng]);
+      const polyCoords = boundaryPoints.filter(p => p.lat && p.lng).map(p => [p.lat, p.lng]);
       const blueZone = window.L.polygon(polyCoords, {
         color: '#0ea5e9',
         weight: 2,
@@ -2815,7 +2826,45 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+
+    if (name === 'workStartDate' || name === 'workEndDate') {
+      const newStart = name === 'workStartDate' ? value : formData.workStartDate;
+      const newEnd = name === 'workEndDate' ? value : formData.workEndDate;
+
+      let durationDays = formData.workDurationDays || 0;
+      let durationHours = formData.workDurationHours || 0;
+      let autoCategory = formData.workDurationCategory || 'long';
+
+      if (newStart && newEnd) {
+        const s = new Date(newStart);
+        const eDate = new Date(newEnd);
+        if (!isNaN(s.getTime()) && !isNaN(eDate.getTime()) && eDate >= s) {
+          const diffMs = eDate.getTime() - s.getTime();
+          durationDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+          durationHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
+
+          if (durationHours > 72) {
+            autoCategory = 'long';
+          } else if (durationHours > 8) {
+            autoCategory = 'medium';
+          } else {
+            autoCategory = 'short';
+          }
+        }
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        workDurationDays: durationDays,
+        workDurationHours: durationHours,
+        total_duration_hours: durationHours,
+        workDurationCategory: autoCategory
+      }));
+      return;
+    }
+
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleCheckboxChange = (name) => {
@@ -2846,6 +2895,116 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
   const handleDwgPlacementsChange = (placements) => {
     setDwgPlacements(placements);
     setFormData(f => ({ ...f, trafficPlacements: placements }));
+  };
+
+  // Auto-extraction handler from Stage 2 (2.1 Map) into Stage 2.2 Cross-Section and Stage 3
+  const handleMapFeaturesExtracted = (features) => {
+    if (!features) return;
+
+    setFormData(prev => {
+      const updates = {};
+
+      // 1. Barriers -> auto-extract to Stage 3 Deterministic Barrier Selection
+      if (features.barriers && features.barriers.length > 0) {
+        updates.barriersList = features.barriers.map((b, idx) => ({
+          id: b.id || `barrier_${idx + 1}`,
+          type: b.type?.includes('concrete') ? 'concrete' : b.type?.includes('plastic') ? 'plastic' : b.type?.includes('cone') ? 'cones' : 'warning_lights',
+          labelAr: b.labelAr || (b.type?.includes('concrete') ? `صبات خرسانية مسلحة NJB (${idx + 1})` : `حواجز بلاستيكية مائية (${idx + 1})`),
+          labelEn: b.labelEn || `Safety Barrier #${idx + 1}`,
+          location: b.name || (language === 'ar' ? `مسار الخريطة ${idx + 1}` : `Map Corridor #${idx + 1}`),
+          lengthM: b.lengthM || 50,
+          clearanceM: b.clearanceM || (b.type?.includes('concrete') ? 0.8 : 2.5),
+          notes: language === 'ar' ? 'مستخرج تلقائياً من خريطة المرحلة ٢.١' : 'Auto-extracted from Stage 2.1 Map'
+        }));
+      }
+
+      // 2. Purple 4-node steel trench plates -> auto-extract to Stage 2.2 Cross-Section & Stage 3
+      if (features.plates && features.plates.length > 0) {
+        updates.trenchPlatesType = 'steel_40t';
+        updates.trenchPlatesCount = features.plates.length;
+        updates.trenchPlateThickness = 30;
+        const avgSpan = features.plates[0].widthM || 1.8;
+        updates.trenchWidth = avgSpan.toFixed(1);
+        updates.trenchPlateSpan = avgSpan.toFixed(1);
+        updates.crossSectionPlates = features.plates;
+      }
+
+      // 3. Detours & Taper -> auto-extract to Stage 2.2 & Stage 3 (3.1 Safety detour specifications sizer)
+      const primaryDetour = features.detours && features.detours.length > 0 ? features.detours[0] : null;
+      const taperLen = features.taperLengthM || (primaryDetour ? primaryDetour.lengthM : 0);
+
+      if (features.detours && features.detours.length > 0) {
+        const totalDetourMeters = features.detours.reduce((sum, d) => sum + (d.lengthM || 0), 0);
+        const startNode = primaryDetour.nodes?.[0];
+        const endNode = primaryDetour.nodes?.[primaryDetour.nodes.length - 1];
+
+        updates.diversionLengthM = totalDetourMeters;
+        if (startNode) {
+          updates.vehicleStart = `Sta 0+000 (E${startNode.x || Math.round((startNode.lng || 39.612)*10000)}, N${startNode.y || Math.round((startNode.lat || 24.468)*10000)})`;
+        }
+        if (endNode) {
+          updates.vehicleEnd = `Sta 0+${totalDetourMeters} (E${endNode.x || Math.round((endNode.lng || 39.612)*10000)}, N${endNode.y || Math.round((endNode.lat || 24.468)*10000)})`;
+        }
+        if (features.detours.length > 1) {
+          updates.detourLanesPlacement = 'dual';
+        }
+      }
+
+      // Auto-populate 3.1 Safety Detour Specifications Sizer from drawing:
+      if (taperLen > 0) {
+        updates.proposedTaper = taperLen;
+        updates.taperLength = taperLen;
+      }
+
+      // Closed traffic lane width (W) from drawing / standard
+      if (!prev.closedLaneWidth || prev.closedLaneWidth === '') {
+        updates.closedLaneWidth = features.laneWidthM || '3.6';
+      }
+      if (!prev.laneWidth || prev.laneWidth === '') {
+        updates.laneWidth = features.laneWidthM || '3.6';
+      }
+
+      // Speed limit (V)
+      if (!prev.speedLimit || prev.speedLimit === '') {
+        updates.speedLimit = '40';
+      }
+
+      // Proposed safety buffer space (SSD)
+      const activeSpeed = parseFloat(updates.speedLimit || prev.speedLimit || '40');
+      let reqBuffer = 50;
+      if (activeSpeed <= 40) reqBuffer = 50;
+      else if (activeSpeed <= 60) reqBuffer = 85;
+      else if (activeSpeed <= 80) reqBuffer = 130;
+      else if (activeSpeed <= 100) reqBuffer = 185;
+      else reqBuffer = 250;
+
+      if (!prev.proposedBuffer || prev.proposedBuffer === '') {
+        updates.proposedBuffer = reqBuffer;
+      }
+      if (!prev.proposedTermination || prev.proposedTermination === '') {
+        updates.proposedTermination = 30;
+      }
+
+      // 4. Pedestrians -> auto-extract to Stage 2.2 & Stage 3
+      if (features.pedestrians && features.pedestrians.length > 0) {
+        const primaryPed = features.pedestrians[0];
+        const pStart = primaryPed.nodes?.[0];
+        const pEnd = primaryPed.nodes?.[primaryPed.nodes.length - 1];
+        updates.includePedestrianPath = true;
+        updates.pedestrianPathProvided = true;
+        updates.pedestrianWalkwayWidth = 1.5;
+        updates.pedestrianProtectionBarrier = 'concrete_barrier';
+        if (pStart) updates.pedestrianStart = `Sta 0+000 (E${pStart.x || 0}, N${pStart.y || 0})`;
+        if (pEnd) updates.pedestrianEnd = `Sta 0+${primaryPed.lengthM || 50} (E${pEnd.x || 0}, N${pEnd.y || 0})`;
+      }
+
+      return { ...prev, ...updates };
+    });
+
+    // 5. Site boundary nodes -> Stage 1 boundary points
+    if (features.siteNodes && features.siteNodes.length >= 3) {
+      setBoundaryPoints(features.siteNodes);
+    }
   };
 
   // 6-DOF Node Coordinate & Orientation Synchronization
@@ -3383,7 +3542,28 @@ Format the response strictly as a compact visual dashboard using ASCII boxes, pr
           strokeDasharray="6 3"
         />
         {/* Steel Trench Bridge Plate */}
-        <rect x={trenchCX - 45} y={roadY - 5} width="90" height="6.5" rx="1.5" fill="#64748b" stroke="#cbd5e1" strokeWidth="1.5" />
+        <rect 
+          x={trenchCX - 45} 
+          y={roadY - 5} 
+          width="90" 
+          height="7" 
+          rx="1.5" 
+          fill={formData.trenchPlatesType === 'steel_40t' || formData.trenchPlatesCount > 0 ? '#a855f7' : '#64748b'} 
+          stroke={formData.trenchPlatesType === 'steel_40t' || formData.trenchPlatesCount > 0 ? '#f3e8ff' : '#cbd5e1'} 
+          strokeWidth="2" 
+        />
+        {(formData.trenchPlatesType === 'steel_40t' || formData.trenchPlatesCount > 0) && (
+          <text
+            x={trenchCX}
+            y={roadY - 8}
+            fill="#c084fc"
+            fontSize="10"
+            fontWeight="bold"
+            textAnchor="middle"
+          >
+            {isAr ? '🛡️ ألواح صلب ٤٠ طن (Purple Plate)' : '🛡️ 40T Steel Trench Plate'}
+          </text>
+        )}
 
         {/* Depth Dimension Indicator Line & Label */}
         {depthM > 0 && (
@@ -4459,13 +4639,11 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                               const lng = Number(result.lng);
                               const x = Math.round(582500 + (lng - 39.6120) * 100000);
                               const y = Math.round(2703800 + (lat - 24.4686) * 110000);
-                              setBoundaryPoints([{ 
-                                lat, 
-                                lng, 
-                                x,
-                                y,
-                                id: Date.now() 
-                              }]);
+                              const newPt = { lat, lng, x, y, id: Date.now() };
+                              setBoundaryPoints(prev => (prev && prev.length > 0 ? [...prev, newPt] : [newPt]));
+                              if (phase1MapInstance.current) {
+                                phase1MapInstance.current.setView([lat, lng], 16);
+                              }
                               setFormData(prev => ({
                                 ...prev,
                                 siteLat: lat,
@@ -4501,6 +4679,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           className={getFieldInputClass(language === 'ar' ? 'locationAr' : 'locationEn', true)} 
                         />
                       </div>
+
                       <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-2">
                         <div>
                           {renderFieldHeader(t.permitStartDate, 'permitStartDate', true)}
@@ -4544,46 +4723,68 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         </div>
                       </div>
 
-                      {/* Work Duration > 72 Hours Intelligent Requirement Banner */}
-                      {(() => {
+                      {/* Work Duration Auto-Extracted from Start Date till End Date */}
+                      {formData.workStartDate && formData.workEndDate && (() => {
                         const start = new Date(formData.workStartDate);
                         const end = new Date(formData.workEndDate);
-                        const durationHours = Math.max(0, (end - start) / (1000 * 60 * 60));
+                        const diffMs = end.getTime() - start.getTime();
+                        const durationDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+                        const durationHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
                         const isOver72h = durationHours > 72;
+                        const isMedium = durationHours > 8 && durationHours <= 72;
 
-                        if (isOver72h) {
-                          return (
-                            <div className="col-span-1 md:col-span-2 bg-amber-50 border border-amber-300 rounded-xl p-3.5 text-xs text-amber-900 font-medium space-y-1 mt-2">
-                              <div className="flex items-center gap-2 font-bold text-amber-800">
-                                <Clock className="w-4 h-4 text-amber-600 animate-pulse" />
-                                <span>
-                                  {language === 'ar'
-                                    ? `مدة العمل المحسوبة: ${Math.round(durationHours)} ساعة (تتجاوز ٧٢ ساعة) — المتطلبات الفنية الإلزامية:`
-                                    : `Work Duration: ${Math.round(durationHours)} Hours (Exceeds 72-Hour Threshold) — Enforced Requirements:`}
+                        return (
+                          <div className={`col-span-1 md:col-span-2 rounded-xl p-4 text-xs font-medium space-y-2 mt-2 border ${
+                            isOver72h 
+                              ? 'bg-amber-50/90 border-amber-300 text-amber-900' 
+                              : isMedium 
+                                ? 'bg-sky-50/90 border-sky-300 text-sky-900'
+                                : 'bg-emerald-50/90 border-emerald-300 text-emerald-900'
+                          }`}>
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-2 font-bold">
+                                <Clock className={`w-4.5 h-4.5 ${isOver72h ? 'text-amber-600 animate-pulse' : isMedium ? 'text-sky-600' : 'text-emerald-600'}`} />
+                                <span className="text-sm">
+                                  {language === 'ar' ? '🕒 مدة العمل المستخرجة تلقائياً من تاريخ البدء والانتهاء:' : '🕒 Auto-Extracted Work Duration from Start to End Date:'}
                                 </span>
                               </div>
-                              <ul className="list-disc list-inside text-[11px] text-amber-800 space-y-0.5 font-sans pl-6">
-                              </ul>
-                            </div>
-                          );
-                        } else if (durationHours > 0) {
-                          return (
-                            <div className="col-span-1 md:col-span-2 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 flex items-center justify-between mt-2">
                               <div className="flex items-center gap-2">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                <span>
-                                  {language === 'ar'
-                                    ? `مدة العمل: ${Math.round(durationHours)} ساعة (أقل من ٧٢ ساعة — تحويلة قصيرة المدى)`
-                                    : `Work Duration: ${Math.round(durationHours)} Hours (Short-term work < 72h)`}
+                                <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold font-mono shadow-2xs bg-white border border-slate-200">
+                                  {durationDays} {language === 'ar' ? 'يوم' : 'Days'} ({durationHours} {language === 'ar' ? 'ساعة' : 'Hours'})
+                                </span>
+                                <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                                  isOver72h 
+                                    ? 'bg-amber-600 text-white' 
+                                    : isMedium 
+                                      ? 'bg-sky-600 text-white' 
+                                      : 'bg-emerald-600 text-white'
+                                }`}>
+                                  {isOver72h 
+                                    ? (language === 'ar' ? 'طويلة المدى (> 72 ساعة)' : 'Long-Term (>72h)')
+                                    : isMedium
+                                      ? (language === 'ar' ? 'متوسطة المدى (8-72 ساعة)' : 'Medium-Term (8-72h)')
+                                      : (language === 'ar' ? 'قصيرة المدى (≤ 8 ساعات)' : 'Short-Term (≤8h)')
+                                  }
                                 </span>
                               </div>
-                              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-mono">
-                                {language === 'ar' ? 'حواجز بلاستيكية/أقماع مسموحة' : 'Plastic/Cones Permitted'}
-                              </span>
                             </div>
-                          );
-                        }
-                        return null;
+                            <p className="text-[11px] leading-relaxed opacity-90 font-sans">
+                              {isOver72h ? (
+                                language === 'ar' 
+                                  ? '🛡️ معايير كود الطرق السعودي (MOT 305): نظراً لتجاوز مدة العمل ٧٢ ساعة، يُلزم النظام استخدام صبات خرسانية مسلحة (NJB) بمسافة خلوص جانبي ٠.٦م - ١.٠م، وسيتم تطبيق واستخراج هذا المعيار تلقائياً في المرحلة ٣.'
+                                  : '🛡️ Saudi Road Code 305 Standard: Since work duration exceeds 72 hours, concrete safety barriers (NJB) with 0.6–1.0m clearance are mandatory in Stage 3.'
+                              ) : isMedium ? (
+                                language === 'ar' 
+                                  ? '🚧 معايير كود الطرق السعودي (MOT 305): مدة العمل بين ٨ إلى ٧٢ ساعة، يُسمح باستخدام حواجز بلاستيكية مائية/رملية مع خلوص جانبي لا يقل عن ٢.٥م.'
+                                  : '🚧 Saudi Road Code 305 Standard: Work duration between 8 and 72 hours permits water/sand-filled plastic barriers with min 2.5m clearance.'
+                              ) : (
+                                language === 'ar' 
+                                  ? '🔶 معايير كود الطرق السعودي (MOT 305): أعمال نهارية مؤقتة لا تتجاوز ٨ ساعات، يُسمح باستخدام سلسلة أقماع تحذيرية متسلسلة.'
+                                  : '🔶 Saudi Road Code 305 Standard: Short-term daylight work under 8 hours permits warning cones series.'
+                              )}
+                            </p>
+                          </div>
+                        );
                       })()}
                     </div>
                   )}
@@ -4666,6 +4867,16 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
 
                       <div className="col-span-1 md:col-span-2">
                         {renderFieldHeader(language === 'ar' ? 'تصنيف مدة الأعمال' : 'Work Duration Category', 'workDurationCategory', true)}
+                        {formData.workStartDate && formData.workEndDate && (
+                          <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-1 mb-2 font-semibold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              {language === 'ar' 
+                                ? `تم استخراج فئة مدة العمل تلقائياً (${formData.workDurationDays || 1} يوم / ${formData.workDurationHours || 24} ساعة) وفق تواريخ المشروع.`
+                                : `Duration category auto-extracted (${formData.workDurationDays || 1} days / ${formData.workDurationHours || 24} hours) from project dates.`}
+                            </span>
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
                           {DURATION_CATEGORIES.map(d => (
                             <button
@@ -4974,8 +5185,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
             )}
 
             {/* PHASE 2 */}
-            {currentPhase === 2 && (
-              <div className="space-y-6 animate-fade-in">
+            <div className={currentPhase === 2 ? 'space-y-6 animate-fade-in' : 'hidden'}>
                 
                 {/* Unified CAD-Derived Auto-Population Banner */}
                 {sharedDwgData && (
@@ -5028,13 +5238,20 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       <DwgMapOverlay
                         language={language}
                         onPlacementsChange={handleDwgPlacementsChange}
-                        anchorLat={formData.siteLat || boundaryPoints?.[0]?.lat || sharedDwgData?.centerLatLng?.[0] || 24.4686}
-                        anchorLng={formData.siteLng || boundaryPoints?.[0]?.lng || sharedDwgData?.centerLatLng?.[1] || 39.6120}
+                        anchorLat={formData.siteLat || sharedDwgData?.centerLatLng?.[0] || 24.4686}
+                        anchorLng={formData.siteLng || sharedDwgData?.centerLatLng?.[1] || 39.6120}
                         roadName={formData.roadNameAr || formData.roadNameEn}
                         preloadedDwgData={sharedDwgData}
                         autoStartDirectDrawing={directDrawingTrigger}
                         onCadParsed={handleCadAutoExtract}
                         onCadReset={handleCadReset}
+                        workDurationHours={formData.workDurationHours || Math.max(0, (new Date(formData.workEndDate) - new Date(formData.workStartDate)) / (1000 * 60 * 60))}
+                        excavationDepth={formData.excavationDepth}
+                        speedLimit={formData.speedLimit}
+                        barriersList={formData.barriersList}
+                        onBarriersChange={(newList) => setFormData(prev => ({ ...prev, barriersList: newList }))}
+                        onMapFeaturesExtracted={handleMapFeaturesExtracted}
+                        isPhaseActive={currentPhase === 2}
                       />
                     </div>
                   )}
@@ -5077,6 +5294,38 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           <span className="text-[10px] bg-blue-600 text-white font-semibold px-2 py-0.5 rounded-full font-mono">
                             {sharedDwgFileName || 'DWG Synced'}
                           </span>
+                        </div>
+                      )}
+
+                      {/* Live Auto-Extraction from Stage 2.1 Map Banner */}
+                      {(formData.barriersList?.length > 0 || formData.trenchPlatesCount > 0 || formData.diversionLengthM || formData.includePedestrianPath) && (
+                        <div className="bg-slate-900 border border-purple-500/50 rounded-xl p-3.5 text-xs text-white shadow-sm flex flex-wrap items-center justify-between gap-2.5">
+                          <div className="flex items-center gap-2 font-bold text-purple-300">
+                            <span className="text-base">⚡</span>
+                            <span>{language === 'ar' ? 'بيانات المقطع العرضي مستخرجة ومحدثة تلقائياً من خريطة المرحلة ٢.١:' : 'Cross-Section Auto-Extracted from Stage 2.1 Map:'}</span>
+                          </div>
+                          <div className="flex items-center flex-wrap gap-2 text-[11px] font-mono">
+                            {formData.barriersList?.length > 0 && (
+                              <span className="bg-cyan-950 text-cyan-300 border border-cyan-700/60 px-2 py-0.5 rounded font-bold">
+                                🧱 {formData.barriersList.length} {language === 'ar' ? 'حواجز' : 'Barriers'}
+                              </span>
+                            )}
+                            {formData.trenchPlatesCount > 0 && (
+                              <span className="bg-purple-950 text-purple-300 border border-purple-500 px-2 py-0.5 rounded font-bold">
+                                🟣 {formData.trenchPlatesCount} {language === 'ar' ? 'ألواح صلب ٤٠ طن (Purple Plate)' : '40T Purple Plates'}
+                              </span>
+                            )}
+                            {formData.diversionLengthM > 0 && (
+                              <span className="bg-red-950 text-red-300 border border-red-700/60 px-2 py-0.5 rounded font-bold">
+                                🚗 {formData.diversionLengthM}م {language === 'ar' ? 'تحويلة' : 'Detour'}
+                              </span>
+                            )}
+                            {formData.includePedestrianPath && (
+                              <span className="bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded font-bold">
+                                🚶 {language === 'ar' ? 'ممر مشاة مشمول' : 'Ped Path Included'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -5384,8 +5633,7 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                   )}
                 </div>
 
-              </div>
-            )}
+            </div>
 
             {/* PHASE 3 */}
             {currentPhase === 3 && (
@@ -5422,7 +5670,14 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase">{t.laneWidth}</label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-bold text-slate-500 uppercase">{t.laneWidth}</label>
+                            {formData.closedLaneWidth && (
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                                {language === 'ar' ? 'محدد من المخطط 📐' : 'From CAD Layout 📐'}
+                              </span>
+                            )}
+                          </div>
                           <input type="number" step="0.1" name="closedLaneWidth" value={formData.closedLaneWidth} onChange={handleInputChange} className="w-full mt-2 border border-slate-300 rounded p-2 text-xs" />
                         </div>
                       </div>
@@ -5430,12 +5685,27 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                       {/* Real time dimension auditing */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
                         <div>
-                          <label className="block text-slate-500 font-bold uppercase">{t.proposedTaper}</label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-slate-500 font-bold uppercase">{t.proposedTaper}</label>
+                            {formData.proposedTaper && (
+                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <span>✓</span>
+                                <span>{language === 'ar' ? 'من الرسم 📐' : 'From Drawing 📐'}</span>
+                              </span>
+                            )}
+                          </div>
                           <input type="number" name="proposedTaper" value={formData.proposedTaper} onChange={handleInputChange} className="w-full mt-1.5 border border-slate-300 rounded p-1.5 font-mono" />
                           <span className="text-[10px] text-slate-500 mt-1 block">{language === 'ar' ? `المطلوب: ${calcs.requiredTaper}م` : `Required: ${calcs.requiredTaper}m`}</span>
                         </div>
                         <div>
-                          <label className="block text-slate-500 font-bold uppercase">{t.proposedBuffer}</label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-slate-500 font-bold uppercase">{t.proposedBuffer}</label>
+                            {formData.proposedBuffer && (
+                              <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                                {language === 'ar' ? 'معيار SSD 🛡️' : 'SSD Buffer 🛡️'}
+                              </span>
+                            )}
+                          </div>
                           <input type="number" name="proposedBuffer" value={formData.proposedBuffer} onChange={handleInputChange} className="w-full mt-1.5 border border-slate-300 rounded p-1.5 font-mono" />
                           <span className="text-[10px] text-slate-500 mt-1 block">{language === 'ar' ? `المطلوب: ${calcs.requiredBuffer}م` : `Required: ${calcs.requiredBuffer}m`}</span>
                         </div>
@@ -5750,55 +6020,296 @@ ${permit.inspector_notes || 'تمت المراجعة والتحقق من اشت�
                         )}
                       </div>
 
-                      {/* Gap 2: Deterministic Barrier Selection Engine Card */}
-                      {barrierReq && (
-                        <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-xs space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-2 font-bold text-amber-400">
-                              <Lock className="h-4 w-4" />
-                              {language === 'ar' ? 'إلزامية نوع الحواجز (محرك المعايير الفنية)' : 'Deterministic Barrier Selection (Enforced)'}
-                            </span>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
-                              {barrierReq.type.toUpperCase()}
-                            </span>
-                          </div>
+                      {/* Gap 2: Deterministic Barrier Selection Engine & Extracted Barriers Center */}
+                      {barrierReq && (() => {
+                        const durationHours = formData.workDurationHours || Math.max(0, (new Date(formData.workEndDate) - new Date(formData.workStartDate)) / (1000 * 60 * 60));
+                        const durationDays = formData.workDurationDays || Math.max(1, Math.round(durationHours / 24));
+                        const depth = parseFloat(formData.excavationDepth) || 0;
+                        const speed = parseFloat(formData.speedLimit) || 50;
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-800/80 p-3 rounded-lg border border-slate-700">
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">{language === 'ar' ? 'نوع الحواجز الملزم' : 'Required Barrier Type'}</label>
-                              <span className="text-sm font-bold text-white block mt-0.5">{language === 'ar' ? barrierReq.labelAr : barrierReq.labelEn}</span>
-                              <span className="text-[10px] text-slate-400 block mt-1">({language === 'ar' ? barrierReq.reasonAr : barrierReq.reasonEn})</span>
+                        return (
+                          <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-xs space-y-4 shadow-md">
+                            {/* Header */}
+                            <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800 pb-3">
+                              <span className="flex items-center gap-2 font-bold text-amber-400 text-sm">
+                                <Lock className="h-4.5 w-4.5" />
+                                {language === 'ar' ? 'إلزامية نوع الحواجز (محرك المعايير الفنية - كود الطرق السعودي ٣٠٥)' : 'Deterministic Barrier Selection (MOT Code 305 Enforced)'}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                                  {language === 'ar' ? `المعيار الملزم: ${barrierReq.type.toUpperCase()}` : `ENFORCED: ${barrierReq.type.toUpperCase()}`}
+                                </span>
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">{language === 'ar' ? 'عمق الحفر (متر)' : 'Excavation Depth (m)'}</label>
+
+                            {/* Section A: Deterministic Benchmark Specification */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-800/80 p-3.5 rounded-lg border border-slate-700">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">
+                                  {language === 'ar' ? 'مدة العمل المستخرجة (المرحلة ١)' : 'Extracted Duration (Stage 1)'}
+                                </label>
+                                <span className="text-xs font-bold text-amber-300 font-mono block mt-1">
+                                  {durationDays} {language === 'ar' ? 'يوم' : 'Days'} ({Math.round(durationHours)} {language === 'ar' ? 'ساعة' : 'Hours'})
+                                </span>
+                                <span className="text-[10px] text-slate-400 block mt-0.5">
+                                  {durationHours > 72 
+                                    ? (language === 'ar' ? 'طويلة المدى (> ٧٢ ساعة)' : 'Long-Term (>72h)')
+                                    : durationHours > 8 
+                                      ? (language === 'ar' ? 'متوسطة المدى (٨-٧٢ ساعة)' : 'Medium-Term (8-72h)')
+                                      : (language === 'ar' ? 'قصيرة المدى (≤ ٨ ساعات)' : 'Short-Term (≤8h)')}
+                                </span>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">
+                                  {language === 'ar' ? 'عمق الحفر المقترح (م)' : 'Excavation Depth (m)'}
+                                </label>
+                                <input 
+                                  type="number" 
+                                  step="0.1" 
+                                  name="excavationDepth" 
+                                  value={formData.excavationDepth} 
+                                  onChange={handleInputChange} 
+                                  className="w-full mt-1 bg-slate-950 border border-slate-700 rounded p-1.5 text-xs text-white font-mono focus:border-amber-400 focus:outline-none" 
+                                  placeholder="0.0"
+                                />
+                                <span className="text-[10px] text-slate-400 block mt-0.5">
+                                  {depth > 0.6 ? (language === 'ar' ? '⚠️ حفر عميق (> ٠.٦م) يتطلب صبات خرسانية' : '⚠️ Deep trench (>0.6m) mandates concrete') : (language === 'ar' ? 'حفر سطحي / عادي' : 'Standard depth')}
+                                </span>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">
+                                  {language === 'ar' ? 'نوع الحواجز الملزم هندسياً' : 'Enforced Barrier Type'}
+                                </label>
+                                <span className="text-xs font-bold text-white block mt-1">
+                                  {language === 'ar' ? barrierReq.labelAr : barrierReq.labelEn}
+                                </span>
+                                <span className="text-[10px] text-amber-400/90 block mt-0.5">
+                                  {language === 'ar' ? barrierReq.reasonAr : barrierReq.reasonEn}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Lateral Clearance input */}
+                            <div className="flex items-center justify-between bg-slate-800/80 p-3 rounded-lg border border-slate-700">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase">
+                                  {language === 'ar' ? 'الارتداد الجانبي الآمن بين الحواجز وحركة المرور (م)' : 'Lateral Safety Clearance to Traffic (m)'}
+                                </label>
+                                <span className="text-[10px] text-slate-400">
+                                  {language === 'ar' ? `النطاق المطلوب لكود ٣٠٥: ${barrierReq.clearanceMin}م - ${barrierReq.clearanceMax}م` : `Required Code 305: ${barrierReq.clearanceMin}م - ${barrierReq.clearanceMax}م`}
+                                </span>
+                              </div>
                               <input 
                                 type="number" 
-                                step="0.1"
-                                name="excavationDepth" 
-                                value={formData.excavationDepth} 
+                                step="0.1" 
+                                name="barrierLateralClearance" 
+                                value={formData.barrierLateralClearance} 
                                 onChange={handleInputChange} 
-                                className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white font-mono" 
-                                placeholder="1.5"
+                                className="w-24 bg-slate-950 border border-slate-700 rounded p-1.5 text-xs text-white font-mono text-center font-bold focus:border-amber-400 focus:outline-none" 
                               />
                             </div>
-                          </div>
 
-                          <div className="flex items-center justify-between bg-slate-800/80 p-3 rounded-lg border border-slate-700">
-                            <div>
-                              <label className="block text-[10px] font-bold text-slate-400 uppercase">{language === 'ar' ? 'الارتداد الجانبي الآمن (م)' : 'Lateral Safety Clearance (m)'}</label>
-                              <span className="text-[10px] text-slate-400">{language === 'ar' ? `النطاق المطلوب: ${barrierReq.clearanceMin}م - ${barrierReq.clearanceMax}م` : `Required: ${barrierReq.clearanceMin}m - ${barrierReq.clearanceMax}m`}</span>
+                            {/* Section B: Extracted User Barriers (Multiple Barriers List) */}
+                            <div className="border-t border-slate-800 pt-3 space-y-2.5">
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                                  <span>🧱</span>
+                                  <span>
+                                    {language === 'ar' 
+                                      ? `الحواجز المستخرجة والمعتمدة للمشروع (${(formData.barriersList || []).length}):`
+                                      : `Extracted & Configured Project Barriers (${(formData.barriersList || []).length}):`}
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAddBarrierForm(prev => !prev)}
+                                  className="px-2.5 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg transition shadow-xs flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>{showAddBarrierForm ? '✕' : '+'}</span>
+                                  <span>{language === 'ar' ? (showAddBarrierForm ? 'إلغاء' : 'إضافة حاجز إضافي') : (showAddBarrierForm ? 'Cancel' : 'Add Another Barrier')}</span>
+                                </button>
+                              </div>
+
+                              {/* Barrier Items List */}
+                              <div className="space-y-2">
+                                {(!formData.barriersList || formData.barriersList.length === 0) ? (
+                                  <div className="bg-slate-800/60 border border-dashed border-slate-700 rounded-lg p-3 text-center text-slate-400 text-[11px]">
+                                    {language === 'ar' ? 'لم تتم إضافة حواجز بعد. انقر على "إضافة حاجز إضافي" أعلاه أو ارسمها في المرحلة ٢.' : 'No barriers added yet. Click "Add Another Barrier" or draw in Stage 2.'}
+                                  </div>
+                                ) : (
+                                  formData.barriersList.map((barrier, bIdx) => {
+                                    const evalRes = evaluateMotBarrierRule(barrier, durationHours, depth, speed);
+                                    const icon = barrier.type?.includes('concrete') ? '🧱' : barrier.type?.includes('plastic') ? '🚧' : barrier.type?.includes('cone') ? '🔶' : '💡';
+
+                                    return (
+                                      <div key={barrier.id || bIdx} className="bg-slate-800/90 border border-slate-700 rounded-lg p-3 space-y-2">
+                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-base">{icon}</span>
+                                            <div>
+                                              <span className="font-bold text-white text-xs block">
+                                                {language === 'ar' ? (barrier.labelAr || barrier.nameAr || 'حاجز أمان') : (barrier.labelEn || barrier.nameEn || 'Safety Barrier')}
+                                              </span>
+                                              <span className="text-[10px] text-slate-400">
+                                                {language === 'ar' ? `الموقع: ${barrier.location || 'محيط العمل'} | الطول: ${barrier.lengthM || 50}م | الخلوص: ${barrier.clearanceM || 0.8}م` : `Zone: ${barrier.location} | Length: ${barrier.lengthM || 50}m | Clearance: ${barrier.clearanceM || 0.8}m`}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                              evalRes.isCompliant 
+                                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                                                : 'bg-red-500/20 text-red-300 border-red-500/40'
+                                            }`}>
+                                              {evalRes.isCompliant ? (language === 'ar' ? '✓ مطابق لكود الطرق ٣٠٥' : '✓ MOT 305 COMPLIANT') : (language === 'ar' ? '⚠️ مخالف لكود ٣٠٥' : '⚠️ NON-COMPLIANT')}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setFormData(prev => ({
+                                                  ...prev,
+                                                  barriersList: prev.barriersList.filter((_, i) => i !== bIdx)
+                                                }));
+                                              }}
+                                              className="text-red-400 hover:text-red-300 font-bold px-1.5 py-0.5 rounded hover:bg-red-950/50 text-[11px] transition cursor-pointer"
+                                              title={language === 'ar' ? 'حذف الحاجز' : 'Delete barrier'}
+                                            >
+                                              ✕
+                                            </button>
+                                          </div>
+                                        </div>
+
+                                        {/* Compliance Explanation */}
+                                        <div className={`p-2 rounded text-[10.5px] leading-relaxed ${
+                                          evalRes.isCompliant ? 'bg-emerald-950/40 text-emerald-300' : 'bg-red-950/60 text-red-200 border border-red-800/60'
+                                        }`}>
+                                          <span className="font-bold">{evalRes.isCompliant ? '🛡️ الاعتماد الفني: ' : '⚠️ سبب المخالفة الفنية: '}</span>
+                                          <span>{language === 'ar' ? evalRes.reasonAr : evalRes.reasonEn}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+
+                              {/* Section C: Add Another Barrier Inline Form */}
+                              {showAddBarrierForm && (
+                                <div className="bg-slate-950 border border-amber-500/40 rounded-xl p-3.5 space-y-3 mt-2 animate-fade-in">
+                                  <div className="font-bold text-amber-400 text-xs flex items-center gap-1.5">
+                                    <span>+</span>
+                                    <span>{language === 'ar' ? 'إضافة حاجز سلامة إضافي للمشروع:' : 'Add Another Safety Barrier:'}</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">{language === 'ar' ? 'نوع الحاجز *' : 'Barrier Type *'}</label>
+                                      <select
+                                        value={newBarrierInput.type}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          const defaultClearance = val === 'concrete' ? 0.8 : 2.5;
+                                          const labelAr = val === 'concrete' ? 'حواجز خرسانية مسلحة NJB' : val === 'plastic' ? 'حواجز بلاستيكية مائية/رملية' : val === 'cones' ? 'سلسلة أقماع تحذيرية' : 'شريط إضاءة تحذيري متصل';
+                                          const labelEn = val === 'concrete' ? 'Concrete NJB Safety Barriers' : val === 'plastic' ? 'Water/Sand-Filled Plastic Barriers' : val === 'cones' ? 'Warning Cones Series' : 'Warning Lights Chain';
+                                          setNewBarrierInput(prev => ({ ...prev, type: val, clearanceM: defaultClearance, labelAr, labelEn }));
+                                        }}
+                                        className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white focus:border-amber-400 focus:outline-none"
+                                      >
+                                        <option value="concrete">{language === 'ar' ? '🧱 صبات خرسانية مسلحة (NJB - 2m)' : '🧱 Concrete NJB Barrier (2m)'}</option>
+                                        <option value="plastic">{language === 'ar' ? '🚧 حواجز بلاستيكية مائية/رملية (1m)' : '🚧 Plastic Water Barriers (1m)'}</option>
+                                        <option value="cones">{language === 'ar' ? '🔶 سلسلة أقماع تحذيرية متكررة' : '🔶 Warning Cones Series'}</option>
+                                        <option value="warning_lights">{language === 'ar' ? '💡 شريط إضاءة وتحذير ليلي' : '💡 Warning Lights Chain'}</option>
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">{language === 'ar' ? 'موضع التركيب / النطاق *' : 'Placement Zone *'}</label>
+                                      <select
+                                        value={newBarrierInput.location}
+                                        onChange={(e) => setNewBarrierInput(prev => ({ ...prev, location: e.target.value }))}
+                                        className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white focus:border-amber-400 focus:outline-none"
+                                      >
+                                        <option value="perimeter">{language === 'ar' ? 'محيط نطاق العمل وحافة حركة السير' : 'Work Zone Perimeter & Traffic Edge'}</option>
+                                        <option value="excavation">{language === 'ar' ? 'حماية خندق وحفرية الأعمال الإنشائية' : 'Excavation Trench & Pit Buffer'}</option>
+                                        <option value="taper">{language === 'ar' ? 'تدرج التحويلة والانحراف المروري' : 'Transition Taper & Shift'}</option>
+                                        <option value="pedestrian">{language === 'ar' ? 'ممر المشاة الآمن والمعابر' : 'Pedestrian Safe Corridor & Crossings'}</option>
+                                      </select>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">{language === 'ar' ? 'طول الحاجز (متر)' : 'Barrier Length (m)'}</label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        value={newBarrierInput.lengthM}
+                                        onChange={(e) => setNewBarrierInput(prev => ({ ...prev, lengthM: Number(e.target.value) || 0 }))}
+                                        className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white font-mono focus:border-amber-400 focus:outline-none"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">{language === 'ar' ? 'الارتداد الجانبي المقترح (متر)' : 'Lateral Clearance (m)'}</label>
+                                      <input
+                                        type="number"
+                                        step="0.1"
+                                        value={newBarrierInput.clearanceM}
+                                        onChange={(e) => setNewBarrierInput(prev => ({ ...prev, clearanceM: Number(e.target.value) || 0 }))}
+                                        className="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white font-mono focus:border-amber-400 focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Live Preview of MOT evaluation for the new barrier */}
+                                  {(() => {
+                                    const previewEval = evaluateMotBarrierRule(newBarrierInput, durationHours, depth, speed);
+                                    return (
+                                      <div className={`p-2 rounded text-[11px] font-semibold border flex items-center justify-between ${
+                                        previewEval.isCompliant ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' : 'bg-red-950/60 border-red-500/50 text-red-300'
+                                      }`}>
+                                        <span className="flex items-center gap-1.5">
+                                          <span>{previewEval.isCompliant ? '✓' : '⚠️'}</span>
+                                          <span>{language === 'ar' ? previewEval.reasonAr : previewEval.reasonEn}</span>
+                                        </span>
+                                        <span className="text-[10px] font-mono uppercase font-extrabold px-1.5 py-0.5 rounded bg-black/40">
+                                          {previewEval.isCompliant ? (language === 'ar' ? 'مطابق' : 'COMPLIANT') : (language === 'ar' ? 'مخالف' : 'NON-COMPLIANT')}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
+
+                                  <div className="flex items-center justify-end gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAddBarrierForm(false)}
+                                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
+                                    >
+                                      {language === 'ar' ? 'إلغاء' : 'Cancel'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const bToAdd = {
+                                          ...newBarrierInput,
+                                          id: `barrier_${Date.now()}`
+                                        };
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          barriersList: [...(prev.barriersList || []), bToAdd]
+                                        }));
+                                        setShowAddBarrierForm(false);
+                                      }}
+                                      className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-xs cursor-pointer"
+                                    >
+                                      {language === 'ar' ? '✓ حفظ وإضافة الحاجز' : '✓ Save & Add Barrier'}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            <input 
-                              type="number" 
-                              step="0.1" 
-                              name="barrierLateralClearance" 
-                              value={formData.barrierLateralClearance} 
-                              onChange={handleInputChange} 
-                              className="w-24 bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white font-mono text-center font-bold" 
-                            />
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Gap 3: Temporary Steel Trench Plate Engineering Validation */}
                       {formData.trenchPlatesType !== 'none' && (

@@ -127,6 +127,95 @@ export function getSimpleBarrierType(durationHours, depthCm) {
 }
 
 // ---------------------------------------------------------------------------
+// 4.1) Full MOT / Saudi Road Code 305 Barrier Rule Evaluator
+// ---------------------------------------------------------------------------
+export function evaluateMotBarrierRule(barrier, durationHours = 0, depthM = 0, speedKmh = 50) {
+  const bType = (barrier.type || barrier.id || '').toLowerCase();
+  const clearance = parseFloat(barrier.clearanceM) || 0;
+  const isLongTerm = durationHours > 72;
+  const isDeepExcavation = depthM > 0.6;
+  const isHighSpeed = speedKmh >= 80;
+
+  let reqType = 'concrete';
+  let reqClearanceMin = 0.6;
+  let reqClearanceMax = 1.0;
+  let ruleBenchmarkAr = 'حواجز خرسانية مسلحة (NJB)';
+  let ruleBenchmarkEn = 'Concrete Safety Barriers (NJB)';
+
+  if (isLongTerm || isDeepExcavation || isHighSpeed) {
+    reqType = 'concrete';
+    reqClearanceMin = 0.6;
+    reqClearanceMax = 1.0;
+    ruleBenchmarkAr = 'حواجز خرسانية مسلحة (NJB)';
+    ruleBenchmarkEn = 'Concrete Safety Barriers (NJB)';
+  } else if (durationHours > 8 && depthM <= 0.3) {
+    reqType = 'plastic';
+    reqClearanceMin = 2.5;
+    reqClearanceMax = 2.5;
+    ruleBenchmarkAr = 'حواجز بلاستيكية مائية/رملية (NJB)';
+    ruleBenchmarkEn = 'Water/Sand-Filled Plastic Barriers';
+  } else {
+    reqType = 'cones';
+    reqClearanceMin = 2.5;
+    reqClearanceMax = 2.5;
+    ruleBenchmarkAr = 'أقماع مرورية تحذيرية متسلسلة';
+    ruleBenchmarkEn = 'Traffic Warning Cones Series';
+  }
+
+  let isCompliant = true;
+  let reasonAr = 'مطابق لكود الطرق السعودي ٣٠٥';
+  let reasonEn = 'Compliant with Saudi Road Code 305';
+
+  const isConcreteChosen = bType.includes('concrete');
+  const isPlasticChosen = bType.includes('plastic') || bType.includes('water');
+  const isConesChosen = bType.includes('cone');
+  const isLightsChosen = bType.includes('light');
+
+  if (reqType === 'concrete') {
+    if (!isConcreteChosen && !isLightsChosen) {
+      isCompliant = false;
+      if (isLongTerm && isDeepExcavation) {
+        reasonAr = `مخالف لكود الطرق ٣٠٥: مدة العمل (${Math.round(durationHours)} س > ٧٢ س) وعمق الحفر (${depthM}م > ٠.٦م) يفرضان حواجز خرسانية مسلحة NJB.`;
+        reasonEn = `Non-compliant with Code 305: Duration > 72h and depth > 0.6m require Concrete NJB barriers.`;
+      } else if (isLongTerm) {
+        reasonAr = `مخالف لكود الطرق ٣٠٥: مدة العمل تتجاوز ٧٢ ساعة (${Math.round(durationHours)} س) — يلزم حواجز خرسانية مسلحة وليس حواجز خفيفة.`;
+        reasonEn = `Non-compliant: Work duration > 72h (${Math.round(durationHours)}h) requires Concrete NJB barriers.`;
+      } else if (isDeepExcavation) {
+        reasonAr = `مخالف لكود الطرق ٣٠٥: عمق الحفر يتجاوز ٠.٦م (${depthM}م) — يلزم حواجز خرسانية عازلة لمنع سقوط المركبات.`;
+        reasonEn = `Non-compliant: Trench depth > 0.6m (${depthM}m) mandates rigid Concrete NJB protection.`;
+      } else {
+        reasonAr = `مخالف لكود الطرق ٣٠٥: سرعة الطريق ٨٠+ كم/س تتطلب حواجز خرسانية مسلحة مع وسائد امتصاص صدمات.`;
+        reasonEn = `Non-compliant: Road speed 80+ km/h mandates Concrete NJB barriers.`;
+      }
+    }
+  } else if (reqType === 'plastic') {
+    if (isConesChosen) {
+      isCompliant = false;
+      reasonAr = `مخالف لكود الطرق ٣٠٥: مدة العمل تتجاوز ٨ ساعات (${Math.round(durationHours)} س) — لا يجوز الاكتفاء بالأقماع، يلزم حواجز بلاستيكية مائية على الأقل.`;
+      reasonEn = `Non-compliant: Duration > 8h requires water-filled plastic barriers, cones insufficient.`;
+    }
+  }
+
+  // Clearance check
+  if (clearance > 0 && clearance < reqClearanceMin) {
+    isCompliant = false;
+    reasonAr += ` (تنبيه: الخلوص الجانبي المقترح ${clearance}م أقل من الحد الأدنى ${reqClearanceMin}م)`;
+    reasonEn += ` (Warning: Clearance ${clearance}m below min ${reqClearanceMin}m)`;
+  }
+
+  return {
+    isCompliant,
+    reqType,
+    reqClearanceMin,
+    reqClearanceMax,
+    ruleBenchmarkAr,
+    ruleBenchmarkEn,
+    reasonAr,
+    reasonEn
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 5) Lighting equipment table (وسائل التحكم المروري - الإنارة)
 // ---------------------------------------------------------------------------
 export const LIGHTING_EQUIPMENT = [

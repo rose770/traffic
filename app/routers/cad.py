@@ -231,3 +231,54 @@ async def cad_to_geojson(
         if response:
             response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"error": str(err) or "CAD parsing failed"}
+
+
+@router.post("/cad/export-trench-dxf")
+def export_trench_dxf(payload: dict):
+    """Exports excavation and utility trench drawing to layered AutoCAD DXF."""
+    import io, math, ezdxf
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4  # Meters
+    msp = doc.modelspace()
+
+    doc.layers.new(name="STREET_NAMES_REF", dxfattribs={"color": 4})
+    doc.layers.new(name="ROAD_REFERENCE", dxfattribs={"color": 8})
+    doc.layers.new(name="TRENCH_ALIGNMENT", dxfattribs={"color": 1})
+    doc.layers.new(name="TRENCH_BOUNDARY", dxfattribs={"color": 2})
+    doc.layers.new(name="DIMENSIONS_ANNOTATION", dxfattribs={"color": 7})
+
+    align_nodes = payload.get("alignmentNodes", [])
+    bound_nodes = payload.get("boundaryNodes", [])
+    road_nodes = payload.get("roadCenterlineNodes", [])
+    street_name = payload.get("streetName", "ROAD")
+
+    anchor_lat = align_nodes[0][0] if align_nodes else 24.4686
+    anchor_lng = align_nodes[0][1] if align_nodes else 39.6120
+    cos_lat = math.cos(math.radians(anchor_lat))
+
+    def to_xy(pt):
+        return ((pt[1] - anchor_lng) * 111320.0 * cos_lat, (pt[0] - anchor_lat) * 110574.61)
+
+    if road_nodes:
+        r_pts = [to_xy(p) for p in road_nodes]
+        msp.add_lwpolyline(r_pts, dxfattribs={"layer": "ROAD_REFERENCE", "color": 8})
+
+    if align_nodes:
+        a_pts = [to_xy(p) for p in align_nodes]
+        msp.add_lwpolyline(a_pts, dxfattribs={"layer": "TRENCH_ALIGNMENT", "color": 1})
+
+    if bound_nodes:
+        b_pts = [to_xy(p) for p in bound_nodes]
+        msp.add_lwpolyline(b_pts, close=True, dxfattribs={"layer": "TRENCH_BOUNDARY", "color": 2})
+
+    msp.add_text(street_name, dxfattribs={"layer": "STREET_NAMES_REF", "color": 4, "height": 2.0}).set_placement((0, 0))
+    msp.add_mtext(f"Trench: {payload.get('projectName', '')}", dxfattribs={"layer": "DIMENSIONS_ANNOTATION", "color": 7, "char_height": 1.5})
+
+    buf = io.StringIO()
+    doc.write(buf)
+    content = buf.getvalue().encode("utf-8")
+    return RawResponse(
+        content=content,
+        media_type="application/dxf",
+        headers={"Content-Disposition": 'attachment; filename="trench_plan.dxf"'}
+    )

@@ -184,3 +184,21 @@ def record_client_log(payload: ClientLogPayload):
 
     return {"success": True, "recorded": log_msg}
 
+
+# ----------------------------------------------------------------------
+# 6. Dynamic ESRI GIS Configuration Provider
+# ----------------------------------------------------------------------
+@router.get("/gis-config")
+def get_gis_config():
+    """Returns runtime ESRI GIS configuration and validated API key status."""
+    key = (os.getenv("ESRI_API_KEY") or os.getenv("VITE_ESRI_API_KEY") or "").strip()
+    return {
+        "success": True,
+        "hasKey": bool(key),
+        "apiKey": key,
+        "prefix": key[:8] if key else "",
+        "keyLength": len(key),
+        "tileUrl": f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}?token={key}" if key else "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}"
+    }
+
+

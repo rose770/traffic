@@ -25,7 +25,8 @@ from app.routers import (
     cad_router,
     geotiff_router,
     ai_router,
-    system_router
+    system_router,
+    roads_router
 )
 
 # 1. Initialize logging and database schema
@@ -69,6 +70,7 @@ app.include_router(cad_router)
 app.include_router(geotiff_router)
 app.include_router(ai_router)
 app.include_router(system_router)
+app.include_router(roads_router)
 
 # 5. Mount Static Assets & SPA Routing
 assets_dir = DIST_DIR / "assets"
